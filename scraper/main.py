@@ -34,21 +34,27 @@ def run_scraper():
         logger.info("Starting movie scraper")
         
         # Get configuration from environment
-        headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'
-        scraper_delay = int(os.getenv('SCRAPER_DELAY', '2'))
+        scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
         
-        # Initialize and run scraper
-        with MovieScraper(headless=headless_mode, delay=scraper_delay) as scraper:
-            # Scrape all movies
-            scraped_movies = scraper.scrape_all_movies()
+        # Initialize scraper
+        scraper = MovieScraper(delay=scraper_delay)
+        
+        # Scrape both movies and cinemas from homepage and save to CSV using streaming
+        movies_result, cinemas_result = scraper.scrape_and_save_both('movies.csv', 'cinemas.csv')
+        
+        # Extract counts from results
+        movie_count = movies_result[0]['count'] if movies_result else 0
+        cinema_count = cinemas_result[0]['count'] if cinemas_result else 0
+        
+        if movie_count > 0:
+            logger.info(f"Successfully scraped {movie_count} movies")
             
-            # Update active status for all movies
-            scraped_movie_names = [movie['name'] for movie in scraped_movies]
-            scraper.update_movie_active_status(scraped_movie_names)
+        if cinema_count > 0:
+            logger.info(f"Successfully scraped {cinema_count} cinemas")
             
-            logger.info(f"Scraper completed successfully. Processed {len(scraped_movies)} movies.")
+        logger.info(f"Scraper completed successfully. Processed {movie_count} movies and {cinema_count} cinemas.")
             
-            return scraped_movies
+        return movie_count, cinema_count
             
     except Exception as e:
         logger.error(f"Error running scraper: {e}")
@@ -58,9 +64,9 @@ def run_scraper():
 def main():
     """Main function."""
     try:
-        movies = run_scraper()
-        logger.info(f"Successfully scraped {len(movies)} movies")
-        print(f"Successfully scraped {len(movies)} movies")
+        movie_count, cinema_count = run_scraper()
+        logger.info(f"Successfully scraped {movie_count} movies and {cinema_count} cinemas")
+        print(f"Successfully scraped {movie_count} movies and {cinema_count} cinemas")
         
     except KeyboardInterrupt:
         logger.info("Scraper interrupted by user")

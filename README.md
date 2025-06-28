@@ -9,7 +9,7 @@ A scalable and efficient movie data scraper built with Python, Selenium, and Sup
 - **Robust Error Handling**: Comprehensive logging and error handling for reliable operation
 - **Flexible Scheduling**: Automated daily scraping with configurable timing
 - **Database Integration**: Seamless integration with Supabase for data storage
-- **Selenium WebDriver**: Handles dynamic content and JavaScript-rendered pages
+- **Requests + BeautifulSoup**: Fast and efficient HTML parsing for static content
 
 ## Project Structure
 
@@ -18,8 +18,7 @@ project/
 │
 ├── scraper/
 │   ├── main.py              # Main entry point
-│   ├── movie_scraper.py     # Core scraper logic
-│   └── cinema_parser.py     # Cinema and showtime parser
+│   └── movie_scraper.py     # Core scraper logic
 │
 ├── db/
 │   └── supabase_client.py   # Database operations
@@ -69,10 +68,9 @@ The scraper uses three main tables in Supabase:
    ```env
    SUPABASE_URL=your_supabase_project_url
    SUPABASE_KEY=your_supabase_anon_key
-   SUPABASE_SCHEMA=knowledge_base  # Optional, defaults to 'knowledge_base'
+   SUPABASE_SCHEMA=public  # Optional, defaults to 'public'
    SUPABASE_SERVICE_KEY=your_supabase_service_role_key  # Optional
    SCRAPER_DELAY=2
-   HEADLESS_MODE=true
    ```
 
 ## Environment Variables
@@ -84,10 +82,9 @@ The following environment variables need to be configured:
 - `SUPABASE_KEY`: Your Supabase anonymous/public API key
 
 ### Optional
-- `SUPABASE_SCHEMA`: Database schema name (default: 'knowledge_base')
+- `SUPABASE_SCHEMA`: Database schema name (default: 'public')
 - `SUPABASE_SERVICE_KEY`: Service role key for admin operations
 - `SCRAPER_DELAY`: Delay between requests in seconds (default: 2)
-- `HEADLESS_MODE`: Run browser in headless mode (default: true)
 
 ## Usage
 
@@ -109,29 +106,36 @@ python schedule.py
 
 The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify the schedule in `schedule.py`.
 
-### Development Mode
+### Testing the Scraper
 
-For development and debugging, you can disable headless mode:
+You can test the scraper with a simple test script:
 
 ```bash
-export HEADLESS_MODE=false
-python scraper/main.py
+python test_scraper.py
 ```
+
+This will test the homepage scraping and CSV export functionality.
 
 ## How It Works
 
-### 1. Initial Scrape
-- Scrapes all movies from the website
-- Stores movie metadata, cinema information, and showtimes
-- Generates content hashes for efficient change detection
+### 1. Homepage Scraping
+- Fetches the main page at https://wmoov.com/
+- Parses the movie dropdown (`select_quick_check_movie`) to extract all movies
+- Parses the cinema dropdown (`select_quick_check_cinema`) to extract all cinemas
 
-### 2. Daily Updates
-- Fetches current list of movies
-- Compares with stored data using content hashes
-- Only updates changed data
-- Marks movies as inactive if no longer showing
+### 2. Detailed Movie Information
+- For each movie, scrapes individual movie details from https://wmoov.com/movie/details/{value}
+- Extracts category from the second `<dd>` within `<dl class="movie_info clearfix">`
+- Extracts description from `<p class="movie-desc">`
+- Saves movie data to CSV with columns: value, name, category, description
+- Saves cinema data to CSV with columns: value, name
 
-### 3. Change Detection
+### 3. Database Storage
+- Stores movie information in Supabase database
+- Uses content hashes for efficient change detection
+- Marks movies as active/inactive based on current availability
+
+### 4. Change Detection
 - Uses MD5 hashes of normalized movie data
 - Compares current hash with stored hash
 - Skips unchanged movies to minimize database writes
