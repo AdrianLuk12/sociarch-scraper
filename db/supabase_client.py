@@ -32,6 +32,40 @@ class SupabaseClient:
         """Get table reference with schema."""
         return self.client.schema(self.schema).table(table_name)
     
+    def movie_exists(self, name: str) -> bool:
+        """
+        Check if a movie exists in the database using exact name match.
+        
+        Args:
+            name: Movie name to check
+            
+        Returns:
+            True if movie exists, False otherwise
+        """
+        try:
+            response = self._get_table('movies').select('id').eq('name', name).execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"Error checking if movie exists {name}: {e}")
+            return False
+    
+    def cinema_exists(self, name: str) -> bool:
+        """
+        Check if a cinema exists in the database using exact name match.
+        
+        Args:
+            name: Cinema name to check
+            
+        Returns:
+            True if cinema exists, False otherwise
+        """
+        try:
+            response = self._get_table('cinemas').select('id').eq('name', name).execute()
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"Error checking if cinema exists {name}: {e}")
+            return False
+    
     def get_movie_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
         Get movie by name from database.
@@ -47,38 +81,6 @@ class SupabaseClient:
             return response.data[0] if response.data else None
         except Exception as e:
             logger.error(f"Error fetching movie {name}: {e}")
-            return None
-    
-    def upsert_movie(self, movie_data: Dict[str, Any]) -> Optional[str]:
-        """
-        Insert or update movie data.
-        
-        Args:
-            movie_data: Dictionary containing movie information
-            
-        Returns:
-            Movie ID if successful, None otherwise
-        """
-        try:
-            # Check if movie exists
-            existing_movie = self.get_movie_by_name(movie_data['name'])
-            
-            if existing_movie:
-                # Update existing movie
-                movie_data['id'] = existing_movie['id']
-                movie_data['last_updated'] = datetime.now().isoformat()
-                response = self._get_table('movies').update(movie_data).eq('id', existing_movie['id']).execute()
-            else:
-                # Insert new movie
-                movie_data['created_at'] = datetime.now().isoformat()
-                response = self._get_table('movies').insert(movie_data).execute()
-            
-            if response.data:
-                return response.data[0]['id']
-            return None
-            
-        except Exception as e:
-            logger.error(f"Error upserting movie {movie_data.get('name')}: {e}")
             return None
     
     def get_cinema_by_name(self, name: str) -> Optional[Dict[str, Any]]:
@@ -98,9 +100,36 @@ class SupabaseClient:
             logger.error(f"Error fetching cinema {name}: {e}")
             return None
     
-    def upsert_cinema(self, cinema_data: Dict[str, Any]) -> Optional[str]:
+    def add_movie(self, movie_data: Dict[str, Any]) -> Optional[str]:
         """
-        Insert or update cinema data.
+        Add a new movie to the database.
+        
+        Args:
+            movie_data: Dictionary containing movie information
+            
+        Returns:
+            Movie ID if successful, None otherwise
+        """
+        try:
+            # Add timestamp
+            movie_data['created_at'] = datetime.now().isoformat()
+            movie_data['last_updated'] = datetime.now().isoformat()
+            
+            response = self._get_table('movies').insert(movie_data).execute()
+            
+            if response.data:
+                movie_id = response.data[0]['id']
+                logger.info(f"Successfully added movie: {movie_data.get('name')} (ID: {movie_id})")
+                return movie_id
+            return None
+            
+        except Exception as e:
+            logger.error(f"Error adding movie {movie_data.get('name')}: {e}")
+            return None
+    
+    def add_cinema(self, cinema_data: Dict[str, Any]) -> Optional[str]:
+        """
+        Add a new cinema to the database.
         
         Args:
             cinema_data: Dictionary containing cinema information
@@ -109,46 +138,50 @@ class SupabaseClient:
             Cinema ID if successful, None otherwise
         """
         try:
-            # Check if cinema exists
-            existing_cinema = self.get_cinema_by_name(cinema_data['name'])
+            # Add timestamp
+            cinema_data['created_at'] = datetime.now().isoformat()
             
-            if existing_cinema:
-                # Update existing cinema
-                cinema_data['id'] = existing_cinema['id']
-                response = self._get_table('cinemas').update(cinema_data).eq('id', existing_cinema['id']).execute()
-            else:
-                # Insert new cinema
-                cinema_data['created_at'] = datetime.now().isoformat()
-                response = self._get_table('cinemas').insert(cinema_data).execute()
+            response = self._get_table('cinemas').insert(cinema_data).execute()
             
             if response.data:
-                return response.data[0]['id']
+                cinema_id = response.data[0]['id']
+                logger.info(f"Successfully added cinema: {cinema_data.get('name')} (ID: {cinema_id})")
+                return cinema_id
             return None
             
         except Exception as e:
-            logger.error(f"Error upserting cinema {cinema_data.get('name')}: {e}")
+            logger.error(f"Error adding cinema {cinema_data.get('name')}: {e}")
             return None
     
-    def clear_movie_showtimes(self, movie_id: str) -> bool:
+    def add_showtime(self, showtime_data: Dict[str, Any]) -> Optional[str]:
         """
-        Clear all showtimes for a specific movie.
+        Add a new showtime to the database.
         
         Args:
-            movie_id: Movie ID
+            showtime_data: Dictionary containing showtime information
             
         Returns:
-            True if successful, False otherwise
+            Showtime ID if successful, None otherwise
         """
         try:
-            self._get_table('showtimes').delete().eq('movie_id', movie_id).execute()
-            return True
+            # Add timestamp
+            showtime_data['created_at'] = datetime.now().isoformat()
+            
+            response = self._get_table('showtimes').insert(showtime_data).execute()
+            
+            if response.data:
+                showtime_id = response.data[0]['id']
+                logger.info(f"Successfully added showtime (ID: {showtime_id})")
+                return showtime_id
+            return None
+            
         except Exception as e:
-            logger.error(f"Error clearing showtimes for movie {movie_id}: {e}")
-            return False
+            logger.error(f"Error adding showtime: {e}")
+            return None
     
-    def insert_showtimes(self, showtimes: List[Dict[str, Any]]) -> bool:
+    def add_showtimes_batch(self, showtimes: List[Dict[str, Any]]) -> bool:
         """
-        Insert multiple showtimes.
+        Add multiple showtimes in a single batch operation.
         
         Args:
             showtimes: List of showtime dictionaries
@@ -160,50 +193,20 @@ class SupabaseClient:
             if not showtimes:
                 return True
                 
-            # Add created_at timestamp
+            # Add created_at timestamp to all showtimes
             for showtime in showtimes:
                 showtime['created_at'] = datetime.now().isoformat()
             
             response = self._get_table('showtimes').insert(showtimes).execute()
-            return len(response.data) == len(showtimes)
+            success = len(response.data) == len(showtimes)
+            
+            if success:
+                logger.info(f"Successfully added {len(showtimes)} showtimes")
+            else:
+                logger.warning(f"Expected {len(showtimes)} showtimes, but only {len(response.data)} were added")
+            
+            return success
             
         except Exception as e:
-            logger.error(f"Error inserting showtimes: {e}")
-            return False
-    
-    def mark_inactive_movies(self, active_movie_names: List[str]) -> bool:
-        """
-        Mark movies as inactive if they're not in the active list.
-        
-        Args:
-            active_movie_names: List of currently active movie names
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            # Mark all movies as inactive first
-            self._get_table('movies').update({'is_active': False}).neq('name', 'dummy').execute()
-            
-            # Then mark the active ones as active
-            if active_movie_names:
-                self._get_table('movies').update({'is_active': True}).in_('name', active_movie_names).execute()
-            
-            return True
-        except Exception as e:
-            logger.error(f"Error updating movie active status: {e}")
-            return False
-    
-    def get_all_active_movies(self) -> List[Dict[str, Any]]:
-        """
-        Get all active movies from database.
-        
-        Returns:
-            List of active movie dictionaries
-        """
-        try:
-            response = self._get_table('movies').select('*').eq('is_active', True).execute()
-            return response.data
-        except Exception as e:
-            logger.error(f"Error fetching active movies: {e}")
-            return [] 
+            logger.error(f"Error adding showtimes batch: {e}")
+            return False 

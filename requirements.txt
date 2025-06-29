@@ -57,3 +57,4 @@ websocket-client==1.8.0
 websockets==15.0.1
 wsproto==1.2.0
 yarl==1.20.1
+zendriver==0.8.1

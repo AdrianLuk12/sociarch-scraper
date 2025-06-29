@@ -1,7 +1,7 @@
 """
-Movie scraper package for wmoov.com
+Movie scraper package for hkmovie6.com
 """
 
-from .movie_scraper import MovieScraper
+from .movie_scraper import MovieScraper, MovieScraperSync
 
-__all__ = ['MovieScraper'] 
+__all__ = ['MovieScraper', 'MovieScraperSync'] 
