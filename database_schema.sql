@@ -1,15 +1,21 @@
 -- Database schema for movie scraper
 -- Run this in your Supabase SQL Editor
 
+-- Create the knowledge_base schema if it doesn't exist
+CREATE SCHEMA IF NOT EXISTS knowledge_base;
+
+-- Grant usage on the knowledge_base schema to anon and authenticated users
+GRANT USAGE ON SCHEMA knowledge_base TO anon;
+GRANT USAGE ON SCHEMA knowledge_base TO authenticated;
+
 -- Create movies table
 CREATE TABLE IF NOT EXISTS knowledge_base.movies (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL,
+    url TEXT,
     category TEXT,
     description TEXT,
-    content_hash TEXT, -- Hash of movie content for change detection
     last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
-    is_active BOOLEAN DEFAULT true,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
@@ -17,6 +23,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base.movies (
 CREATE TABLE IF NOT EXISTS knowledge_base.cinemas (
     id UUID DEFAULT gen_random_uuid() PRIMARY KEY,
     name TEXT NOT NULL UNIQUE,
+    url TEXT,
     address TEXT,
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
@@ -31,9 +38,22 @@ CREATE TABLE IF NOT EXISTS knowledge_base.showtimes (
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
+-- Grant permissions on tables to anon and authenticated users
+-- Movies table permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.movies TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.movies TO authenticated;
+
+-- Cinemas table permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.cinemas TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.cinemas TO authenticated;
+
+-- Showtimes table permissions
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.showtimes TO anon;
+GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.showtimes TO authenticated;
+
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_movies_name ON knowledge_base.movies(name);
-CREATE INDEX IF NOT EXISTS idx_movies_is_active ON knowledge_base.movies(is_active);
+
 CREATE INDEX IF NOT EXISTS idx_movies_last_updated ON knowledge_base.movies(last_updated);
 CREATE INDEX IF NOT EXISTS idx_cinemas_name ON knowledge_base.cinemas(name);
 CREATE INDEX IF NOT EXISTS idx_showtimes_movie_id ON knowledge_base.showtimes(movie_id);
