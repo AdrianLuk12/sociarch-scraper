@@ -1,92 +1,112 @@
-# Movie Data Scraper for wmoov.com
+# Movie Data Scraper for hkmovie6.com
 
-A scalable and efficient movie data scraper built with Python, Selenium, and Supabase. This scraper extracts movie information including names, categories, descriptions, cinema details, and showtimes from [wmoov.com](https://wmoov.com/).
+A scalable and efficient movie data scraper built with Python, Zendriver, and Supabase. This scraper extracts comprehensive movie information including names, categories, descriptions, cinema details, and showtimes from [hkmovie6.com](https://hkmovie6.com/).
 
 ## Features
 
-- **Efficient Change Detection**: Uses hash-based comparison to avoid redundant scraping and database writes
-- **Scalable Architecture**: Modular design with separate components for scraping, parsing, and data storage
-- **Robust Error Handling**: Comprehensive logging and error handling for reliable operation
+- **Modern Browser Automation**: Uses Zendriver for fast, reliable browser automation
+- **Intelligent Language Handling**: Automatically detects and switches to English interface
+- **Comprehensive Data Extraction**: Scrapes movies, cinemas, and detailed information
+- **Dual Output Options**: Saves data to both CSV files and Supabase database
+- **Robust Error Handling**: Comprehensive logging and retry mechanisms
 - **Flexible Scheduling**: Automated daily scraping with configurable timing
 - **Database Integration**: Seamless integration with Supabase for data storage
-- **Requests + BeautifulSoup**: Fast and efficient HTML parsing for static content
+- **Async & Sync Support**: Both asynchronous and synchronous implementations available
 
 ## Project Structure
 
 ```
-project/
+sociarch-scraper/
 │
 ├── scraper/
 │   ├── main.py              # Main entry point
-│   └── movie_scraper.py     # Core scraper logic
+│   └── movie_scraper.py     # Core scraper logic with Zendriver
 │
 ├── db/
+│   ├── __init__.py
 │   └── supabase_client.py   # Database operations
 │
-├── utils/
-│   └── hashing.py           # Hash utilities for change detection
+├── context/                 # Project documentation
+│   ├── steps.md
+│   └── movie scraper structure.md
 │
 ├── database_schema.sql      # Supabase database schema
 ├── schedule.py              # Automated scheduler
+├── test_setup.py           # Setup testing script
 ├── requirements.txt         # Python dependencies
-├── env.example              # Environment variables template
 └── README.md               # This file
 ```
 
 ## Database Schema
 
-The scraper uses three main tables in Supabase:
+The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 
-- **movies**: Store movie metadata (name, category, description, content hash)
-- **cinemas**: Store cinema information (name, address, location type)
-- **showtimes**: Store showtime data linking movies and cinemas
+- **movies**: Store movie metadata (name, url, category, description, created_at)
+- **cinemas**: Store cinema information (name, url, address, created_at)
+- **showtimes**: Store showtime data linking movies and cinemas with timestamps and language info
 
 ## Installation
 
 1. **Clone the repository**
    ```bash
    git clone <repository-url>
-   cd movie-scraper
+   cd sociarch-scraper
    ```
 
-2. **Install Python dependencies**
+2. **Set up Python virtual environment**
+   ```bash
+   python -m venv venv
+   source venv/bin/activate  # On Windows: venv\Scripts\activate
+   ```
+
+3. **Install Python dependencies**
    ```bash
    pip install -r requirements.txt
    ```
 
-3. **Set up Supabase**
+4. **Set up Supabase**
    - Create a new Supabase project
    - Run the SQL schema from `database_schema.sql` in your Supabase SQL Editor
    - Get your project URL and API keys
 
-4. **Configure environment variables**
-   ```bash
-   cp env.example .env
-   ```
-   
-   Edit `.env` and add your Supabase credentials:
+5. **Configure environment variables**
+   Create a `.env` file in the project root:
    ```env
    SUPABASE_URL=your_supabase_project_url
    SUPABASE_KEY=your_supabase_anon_key
-   SUPABASE_SCHEMA=public  # Optional, defaults to 'public'
+   SUPABASE_SCHEMA=knowledge_base
    SUPABASE_SERVICE_KEY=your_supabase_service_role_key  # Optional
    SCRAPER_DELAY=2
+   HEADLESS_MODE=true
    ```
 
 ## Environment Variables
-
-The following environment variables need to be configured:
 
 ### Required
 - `SUPABASE_URL`: Your Supabase project URL
 - `SUPABASE_KEY`: Your Supabase anonymous/public API key
 
 ### Optional
-- `SUPABASE_SCHEMA`: Database schema name (default: 'public')
+- `SUPABASE_SCHEMA`: Database schema name (default: 'knowledge_base')
 - `SUPABASE_SERVICE_KEY`: Service role key for admin operations
 - `SCRAPER_DELAY`: Delay between requests in seconds (default: 2)
+- `HEADLESS_MODE`: Run browser in headless mode (default: 'true')
 
 ## Usage
+
+### Testing Your Setup
+
+Before running the scraper, test your configuration:
+
+```bash
+python test_setup.py
+```
+
+This will verify:
+- Environment variables are set correctly
+- All Python dependencies are installed
+- Browser driver is working
+- Database connection is successful
 
 ### One-time Scraping
 
@@ -95,6 +115,14 @@ Run the scraper once to collect all current movie data:
 ```bash
 python scraper/main.py
 ```
+
+This will:
+- Navigate to hkmovie6.com
+- Switch interface to English if needed
+- Scrape all movies and cinemas from dropdown menus
+- Extract detailed information for each movie and cinema
+- Save data to CSV files (`movies.csv`, `cinemas.csv`, `movies_details.csv`, `cinemas_details.csv`)
+- Optionally store data in Supabase database
 
 ### Scheduled Scraping
 
@@ -106,145 +134,205 @@ python schedule.py
 
 The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify the schedule in `schedule.py`.
 
-### Testing the Scraper
-
-You can test the scraper with a simple test script:
-
-```bash
-python test_scraper.py
-```
-
-This will test the homepage scraping and CSV export functionality.
-
 ## How It Works
 
-### 1. Homepage Scraping
-- Fetches the main page at https://wmoov.com/
-- Parses the movie dropdown (`select_quick_check_movie`) to extract all movies
-- Parses the cinema dropdown (`select_quick_check_cinema`) to extract all cinemas
+### 1. Browser Setup & Navigation
+- Initializes Zendriver with Chrome browser
+- Navigates to https://hkmovie6.com/
+- Automatically detects page language and switches to English if needed
+- Sets up proper browser options for reliable scraping
 
-### 2. Detailed Movie Information
-- For each movie, scrapes individual movie details from https://wmoov.com/movie/details/{value}
-- Extracts category from the second `<dd>` within `<dl class="movie_info clearfix">`
-- Extracts description from `<p class="movie-desc">`
-- Saves movie data to CSV with columns: value, name, category, description
-- Saves cinema data to CSV with columns: value, name
+### 2. Data Extraction Process
 
-### 3. Database Storage
-- Stores movie information in Supabase database
-- Uses content hashes for efficient change detection
-- Marks movies as active/inactive based on current availability
+**Movies**:
+- Finds and activates the movie dropdown menu
+- Extracts all available movies with their names and URLs
+- For each movie, visits the detail page to extract:
+  - Category information
+  - Full description
+  - Additional metadata
 
-### 4. Change Detection
-- Uses MD5 hashes of normalized movie data
-- Compares current hash with stored hash
-- Skips unchanged movies to minimize database writes
-- Updates only when content has actually changed
+**Cinemas**:
+- Locates the cinema dropdown menu
+- Extracts all cinema names and URLs
+- Visits each cinema detail page to collect:
+  - Full address information
+  - Location details
+  - Contact information
 
-## Customization
+### 3. Data Storage
+- **CSV Output**: Saves data to structured CSV files for easy analysis
+- **Database Storage**: Stores data in Supabase with proper relationships
+- **Duplicate Prevention**: Checks for existing records to avoid duplicates
 
-### Adding New Selectors
+### 4. Error Handling & Reliability
+- **Retry Logic**: Multiple attempts for navigation and data extraction
+- **Language Detection**: Handles both English and Chinese interfaces
+- **Connection Recovery**: Automatic browser restart on failures
+- **Comprehensive Logging**: Detailed logs for monitoring and debugging
 
-The scraper uses placeholder selectors that need to be replaced with actual CSS selectors from the website:
+## Configuration Options
 
-1. **Movie Links**: Update selectors in `movie_scraper.py` at `[data-movie-link]`
-2. **Movie Metadata**: Update selectors in `_extract_movie_metadata()` 
-3. **Cinema Data**: Update selectors in `cinema_parser.py`
-4. **Showtimes**: Update selectors in `_extract_showtimes()`
-
-### Modifying Schedule
-
-Edit `schedule.py` to change the scraping schedule:
-
+### Browser Settings
 ```python
-# Change from daily at 6 AM to every 12 hours
-trigger = CronTrigger(hour='6,18', minute=0, timezone='Asia/Hong_Kong')
+# In scraper/main.py
+headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'
+scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
 ```
 
-### Adding New Data Fields
+### Scheduling Configuration
+```python
+# In schedule.py - modify to change schedule
+trigger = CronTrigger(
+    hour=6,
+    minute=0,
+    timezone='Asia/Hong_Kong'
+)
+```
 
-1. Update the database schema in `database_schema.sql`
-2. Modify the scraper to extract new fields
-3. Update the hash generation in `utils/hashing.py`
+## Output Files
 
-## Logging
+The scraper generates several output files:
 
-The scraper generates detailed logs:
-
-- `movie_scraper.log`: General scraper logs
+- `movies.csv`: Basic movie list with names and URLs
+- `movies_details.csv`: Detailed movie information including categories and descriptions
+- `cinemas.csv`: Basic cinema list with names and URLs  
+- `cinemas_details.csv`: Detailed cinema information including addresses
+- `movie_scraper.log`: General application logs
 - `movie_scraper_scheduler.log`: Scheduler-specific logs
 
-Logs include:
-- Scraping progress and statistics
-- Error messages and warnings
-- Performance metrics
-- Database operation results
+## Database Integration
 
-## Error Handling
+### Supabase Tables
 
-The scraper includes robust error handling:
+```sql
+-- Movies table
+knowledge_base.movies (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL,
+    url TEXT,
+    category TEXT,
+    description TEXT,
+    created_at TIMESTAMP WITH TIME ZONE
+)
 
-- **Network Issues**: Automatic retries and timeouts
-- **Element Not Found**: Graceful degradation with warnings
-- **Database Errors**: Detailed logging and transaction rollbacks
-- **Browser Crashes**: Driver restart and recovery
+-- Cinemas table  
+knowledge_base.cinemas (
+    id UUID PRIMARY KEY,
+    name TEXT NOT NULL UNIQUE,
+    url TEXT,
+    address TEXT,
+    created_at TIMESTAMP WITH TIME ZONE
+)
 
-## Performance Optimization
+-- Showtimes table (for future expansion)
+knowledge_base.showtimes (
+    id UUID PRIMARY KEY,
+    movie_id UUID REFERENCES movies(id),
+    cinema_id UUID REFERENCES cinemas(id),
+    showtime TIMESTAMP WITH TIME ZONE,
+    language TEXT,
+    created_at TIMESTAMP WITH TIME ZONE
+)
+```
 
-- **Hash-based Change Detection**: Avoids unnecessary database writes
-- **Batch Operations**: Groups database operations for efficiency
-- **Connection Pooling**: Reuses database connections
-- **Rate Limiting**: Configurable delays between requests
-- **Headless Mode**: Faster execution without UI rendering
+## Monitoring & Logging
 
-## Monitoring
+### Log Files
+- **movie_scraper.log**: Application logs with scraping progress and errors
+- **movie_scraper_scheduler.log**: Scheduled job execution logs
 
-Monitor the scraper using:
+### Log Levels
+```python
+# Set in scraper code
+logging.basicConfig(level=logging.INFO)
+logger.info("Informational messages")
+logger.warning("Warning messages") 
+logger.error("Error messages")
+```
 
-- Log files for detailed operation history
-- Database queries to check data freshness
-- Supabase dashboard for real-time database metrics
+### Monitoring Scraper Health
+```bash
+# Check recent logs
+tail -f movie_scraper.log
+
+# Check scheduler status
+tail -f movie_scraper_scheduler.log
+
+# Monitor CSV output
+ls -la *.csv
+```
+
+## Development
+
+### Architecture
+
+The scraper uses a modular architecture:
+
+- **MovieScraper**: Async implementation using Zendriver
+- **MovieScraperSync**: Synchronous wrapper for easier usage
+- **SupabaseClient**: Database operations and connection management
+- **Scheduler**: APScheduler integration for automated runs
+
+### Adding New Features
+
+1. **New Data Fields**: Update database schema and extraction methods
+2. **Additional Sites**: Create new scraper classes following the same pattern
+3. **Custom Scheduling**: Modify `schedule.py` with new cron triggers
+4. **Data Processing**: Add transformation logic in the scraper classes
 
 ## Troubleshooting
 
 ### Common Issues
 
-1. **ChromeDriver Issues**
-   - Ensure Chrome browser is installed
-   - WebDriver Manager will automatically download the correct driver
+1. **Browser/Driver Issues**
+   ```bash
+   # Zendriver manages Chrome automatically
+   # Ensure Chrome browser is installed
+   google-chrome --version
+   ```
 
-2. **Supabase Connection Errors**
-   - Verify environment variables are correctly set
-   - Check Supabase project settings and API keys
-   - Ensure database schema has been created
+2. **Environment Variable Issues**
+   ```bash
+   # Run setup test to verify configuration
+   python test_setup.py
+   ```
 
-3. **Element Not Found Errors**
-   - Website structure may have changed
-   - Update CSS selectors in the scraper code
-   - Check if website requires authentication
+3. **Database Connection Issues**
+   ```bash
+   # Verify Supabase credentials
+   python -c "from db.supabase_client import SupabaseClient; client = SupabaseClient()"
+   ```
 
-4. **Memory Issues**
-   - Reduce batch sizes in database operations
-   - Increase delay between requests
-   - Monitor system resources during execution
+4. **Language Detection Issues**
+   - The scraper automatically handles Chinese to English switching
+   - Check logs for language detection messages
+   - Verify the language switcher element is available on the page
 
 ### Debug Mode
 
 Run with debugging enabled:
 
 ```bash
+# Set headless mode to false to see browser
 export HEADLESS_MODE=false
-python -u scraper/main.py 2>&1 | tee debug.log
+python scraper/main.py
 ```
+
+### Performance Optimization
+
+- Adjust `SCRAPER_DELAY` to balance speed vs. reliability
+- Use headless mode (`HEADLESS_MODE=true`) for better performance
+- Monitor system resources during large scraping operations
+
+## License
+
+This project is for educational and research purposes. Please respect the website's robots.txt and terms of service when scraping.
 
 ## Contributing
 
 1. Fork the repository
 2. Create a feature branch
-3. Update selectors and test with the actual website
-4. Add tests for new functionality
-5. Submit a pull request
-
-## License
-
-This project is for educational and research purposes. Please respect the website's robots.txt and terms of service when scraping. 
+3. Test your changes with `python test_setup.py`
+4. Add tests for new functionality  
+5. Submit a pull request 
