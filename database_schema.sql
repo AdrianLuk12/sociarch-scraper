@@ -15,7 +15,6 @@ CREATE TABLE IF NOT EXISTS knowledge_base.movies (
     url TEXT,
     category TEXT,
     description TEXT,
-    last_updated TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 
