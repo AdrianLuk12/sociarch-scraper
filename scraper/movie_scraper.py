@@ -7,6 +7,7 @@ import time
 import asyncio
 import csv
 from typing import Dict, List, Optional, Union, Tuple
+from datetime import datetime, date
 import zendriver as zd
 
 from db.supabase_client import SupabaseClient
@@ -589,7 +590,7 @@ class MovieScraper:
 
     async def scrape_cinema_details(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
         """
-        Scrape detailed information for a specific cinema
+        Scrape detailed information for a specific cinema and its showtimes
         
         Args:
             cinema_name: Name of the cinema
@@ -633,6 +634,22 @@ class MovieScraper:
             # Sanitize the address
             sanitized_address = self._sanitize_csv_text(address)
             
+            # Get cinema_id from database (cinema should already exist)
+            cinema_data = self.db_client.get_cinema_by_name(cinema_name)
+            if not cinema_data:
+                logger.error(f"Cinema '{cinema_name}' not found in database")
+                return {
+                    'name': cinema_name,
+                    'url': cinema_url,
+                    'address': sanitized_address or 'Address not available'
+                }
+            
+            cinema_id = cinema_data['id']
+            logger.info(f"Found cinema in database with ID: {cinema_id}")
+            
+            # Now scrape showtimes on the same page
+            await self._scrape_showtimes_for_cinema(cinema_id, cinema_name)
+            
             return {
                 'name': cinema_name,
                 'url': cinema_url,
@@ -646,6 +663,246 @@ class MovieScraper:
                 'url': cinema_url,
                 'address': 'Error retrieving address'
             }
+    
+    async def _scrape_showtimes_for_cinema(self, cinema_id: str, cinema_name: str):
+        """
+        Scrape showtimes for a specific cinema (assumes we're already on the cinema page)
+        
+        Args:
+            cinema_id: Database ID of the cinema
+            cinema_name: Name of the cinema for logging
+        """
+        try:
+            logger.info(f"Scraping showtimes for cinema: {cinema_name}")
+            
+            # Get all date buttons
+            date_buttons = await self.page.evaluate("""
+                (() => {
+                    const dateCells = document.querySelectorAll('div.dateCell');
+                    return dateCells.length;
+                })()
+            """)
+            
+            if not date_buttons:
+                logger.warning(f"No date buttons found for cinema: {cinema_name}")
+                return
+            
+            logger.info(f"Found {date_buttons} date buttons for cinema: {cinema_name}")
+            
+            # Process each date
+            for date_index in range(date_buttons):
+                try:
+                    # Click on the date button
+                    date_text = await self.page.evaluate(f"""
+                        (() => {{
+                            const dateCells = document.querySelectorAll('div.dateCell');
+                            if (dateCells.length > {date_index}) {{
+                                const dateCell = dateCells[{date_index}];
+                                dateCell.click();
+                                
+                                // Get the date text
+                                const dateDiv = dateCell.querySelector('div.date');
+                                return dateDiv ? dateDiv.textContent.trim() : '';
+                            }}
+                            return '';
+                        }})()
+                    """)
+                    
+                    if not date_text:
+                        logger.warning(f"Could not get date text for button {date_index}")
+                        continue
+                    
+                    # Parse the date and convert to full date
+                    show_date = self._parse_date_text(date_text)
+                    if not show_date:
+                        logger.warning(f"Could not parse date: {date_text}")
+                        continue
+                    
+                    logger.info(f"Processing date {date_text} -> {show_date}")
+                    
+                    # Wait for content to load after clicking date
+                    await asyncio.sleep(1)
+                    
+                    # Get all movies for this date
+                    movies_data = await self.page.evaluate("""
+                        (() => {
+                            const movies = [];
+                            const cinemaElements = document.querySelectorAll('div.cinema');
+                            
+                            cinemaElements.forEach(cinema => {
+                                const nameDiv = cinema.querySelector('div.cinemaName div.name');
+                                const versionsDiv = cinema.querySelector('div.versions');
+                                const timeElements = cinema.querySelectorAll('div.table div.time');
+                                
+                                const movieName = nameDiv ? nameDiv.textContent.trim() : '';
+                                const language = versionsDiv ? versionsDiv.textContent.trim() : '';
+                                const showtimes = Array.from(timeElements).map(el => el.textContent.trim());
+                                
+                                if (movieName && showtimes.length > 0) {
+                                    movies.push({
+                                        name: movieName,
+                                        language: language,
+                                        showtimes: showtimes
+                                    });
+                                }
+                            });
+                            
+                            return movies;
+                        })()
+                    """)
+                    
+                    logger.info(f"Found {len(movies_data)} movies for date {date_text}")
+                    
+                    # Process each movie
+                    for movie_info in movies_data:
+                        await self._process_movie_showtimes(
+                            cinema_id, 
+                            movie_info['name'], 
+                            movie_info['language'], 
+                            movie_info['showtimes'], 
+                            show_date
+                        )
+                    
+                except Exception as e:
+                    logger.error(f"Error processing date {date_index} for cinema {cinema_name}: {e}")
+                    continue
+            
+            logger.info(f"Completed showtime scraping for cinema: {cinema_name}")
+            
+        except Exception as e:
+            logger.error(f"Error scraping showtimes for cinema {cinema_name}: {e}")
+    
+    async def _process_movie_showtimes(self, cinema_id: str, movie_name: str, language: str, showtimes: List[str], show_date: date):
+        """
+        Process showtimes for a specific movie and add to database if not exists
+        
+        Args:
+            cinema_id: Database ID of the cinema
+            movie_name: Name of the movie
+            language: Language/version of the movie
+            showtimes: List of showtime strings in HH:MM format
+            show_date: Date object for the show date
+        """
+        try:
+            # Get movie_id from database
+            movie_data = self.db_client.get_movie_by_name(movie_name)
+            if not movie_data:
+                logger.warning(f"Movie '{movie_name}' not found in database, skipping showtimes")
+                return
+            
+            movie_id = movie_data['id']
+            
+            showtimes_added = 0
+            showtimes_skipped = 0
+            
+            # Process each showtime
+            for showtime_str in showtimes:
+                try:
+                    # Convert showtime string to full timestamp
+                    showtime_timestamp = self._convert_to_timestamp(showtime_str, show_date)
+                    if not showtime_timestamp:
+                        logger.warning(f"Could not convert showtime: {showtime_str}")
+                        continue
+                    
+                    # Check if showtime already exists
+                    if self.db_client.showtime_exists(movie_id, cinema_id, showtime_timestamp, language):
+                        showtimes_skipped += 1
+                        continue
+                    
+                    # Add new showtime
+                    showtime_data = {
+                        'movie_id': movie_id,
+                        'cinema_id': cinema_id,
+                        'showtime': showtime_timestamp,
+                        'language': language
+                    }
+                    
+                    showtime_id = self.db_client.add_showtime(showtime_data)
+                    if showtime_id:
+                        showtimes_added += 1
+                    else:
+                        logger.error(f"Failed to add showtime: {showtime_data}")
+                
+                except Exception as e:
+                    logger.error(f"Error processing showtime {showtime_str}: {e}")
+                    continue
+            
+            if showtimes_added > 0 or showtimes_skipped > 0:
+                logger.info(f"Movie '{movie_name}' ({language}): {showtimes_added} added, {showtimes_skipped} skipped")
+            
+        except Exception as e:
+            logger.error(f"Error processing movie showtimes for {movie_name}: {e}")
+    
+    def _parse_date_text(self, date_text: str) -> Optional[date]:
+        """
+        Parse date text in day/month format and convert to full date
+        
+        Args:
+            date_text: Date string in format like "15/12" or "15/1"
+            
+        Returns:
+            Date object or None if parsing fails
+        """
+        try:
+            # Remove any extra whitespace and split
+            parts = date_text.strip().split('/')
+            if len(parts) != 2:
+                return None
+            
+            day = int(parts[0])
+            month = int(parts[1])
+            
+            # Get current year
+            current_year = datetime.now().year
+            
+            # Create date with current year
+            try:
+                show_date = date(current_year, month, day)
+                
+                # If the date is in the past (more than 1 day ago), use next year
+                today = date.today()
+                if show_date < today:
+                    show_date = date(current_year + 1, month, day)
+                
+                return show_date
+                
+            except ValueError:
+                logger.error(f"Invalid date: day={day}, month={month}, year={current_year}")
+                return None
+            
+        except (ValueError, IndexError) as e:
+            logger.error(f"Error parsing date text '{date_text}': {e}")
+            return None
+    
+    def _convert_to_timestamp(self, time_str: str, show_date: date) -> Optional[str]:
+        """
+        Convert time string and date to ISO timestamp string compatible with timestamptz
+        
+        Args:
+            time_str: Time string in HH:MM format
+            show_date: Date object
+            
+        Returns:
+            ISO timestamp string or None if conversion fails
+        """
+        try:
+            # Parse time string
+            time_parts = time_str.strip().split(':')
+            if len(time_parts) != 2:
+                return None
+            
+            hour = int(time_parts[0])
+            minute = int(time_parts[1])
+            
+            # Create datetime object
+            show_datetime = datetime.combine(show_date, datetime.min.time().replace(hour=hour, minute=minute))
+            
+            # Convert to ISO format string (assumes local timezone)
+            return show_datetime.isoformat()
+            
+        except (ValueError, IndexError) as e:
+            logger.error(f"Error converting time '{time_str}' for date {show_date}: {e}")
+            return None
 
     async def scrape_all_movie_details(self, movies_csv_file: str = "movies.csv", output_file: str = "movies_details.csv"):
         """
