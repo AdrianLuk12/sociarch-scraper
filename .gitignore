@@ -194,3 +194,5 @@ cython_debug/
 .cursorindexingignore
 
 /context/
+*movies*.csv
+*cinemas*.csv
