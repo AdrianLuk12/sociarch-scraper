@@ -66,6 +66,32 @@ class SupabaseClient:
             logger.error(f"Error checking if cinema exists {name}: {e}")
             return False
     
+    def showtime_exists(self, movie_id: str, cinema_id: str, showtime: str, language: str) -> bool:
+        """
+        Check if a showtime exists in the database using exact match on all criteria.
+        
+        Args:
+            movie_id: Movie ID to check
+            cinema_id: Cinema ID to check
+            showtime: Showtime timestamp to check
+            language: Language to check
+            
+        Returns:
+            True if showtime exists with exact match, False otherwise
+        """
+        try:
+            response = (self._get_table('showtimes')
+                       .select('id')
+                       .eq('movie_id', movie_id)
+                       .eq('cinema_id', cinema_id)
+                       .eq('showtime', showtime)
+                       .eq('language', language)
+                       .execute())
+            return len(response.data) > 0
+        except Exception as e:
+            logger.error(f"Error checking if showtime exists (movie: {movie_id}, cinema: {cinema_id}, time: {showtime}, lang: {language}): {e}")
+            return False
+    
     def get_movie_by_name(self, name: str) -> Optional[Dict[str, Any]]:
         """
         Get movie by name from database.
@@ -113,7 +139,6 @@ class SupabaseClient:
         try:
             # Add timestamp
             movie_data['created_at'] = datetime.now().isoformat()
-            movie_data['last_updated'] = datetime.now().isoformat()
             
             response = self._get_table('movies').insert(movie_data).execute()
             
@@ -178,35 +203,3 @@ class SupabaseClient:
         except Exception as e:
             logger.error(f"Error adding showtime: {e}")
             return None
-    
-    def add_showtimes_batch(self, showtimes: List[Dict[str, Any]]) -> bool:
-        """
-        Add multiple showtimes in a single batch operation.
-        
-        Args:
-            showtimes: List of showtime dictionaries
-            
-        Returns:
-            True if successful, False otherwise
-        """
-        try:
-            if not showtimes:
-                return True
-                
-            # Add created_at timestamp to all showtimes
-            for showtime in showtimes:
-                showtime['created_at'] = datetime.now().isoformat()
-            
-            response = self._get_table('showtimes').insert(showtimes).execute()
-            success = len(response.data) == len(showtimes)
-            
-            if success:
-                logger.info(f"Successfully added {len(showtimes)} showtimes")
-            else:
-                logger.warning(f"Expected {len(showtimes)} showtimes, but only {len(response.data)} were added")
-            
-            return success
-            
-        except Exception as e:
-            logger.error(f"Error adding showtimes batch: {e}")
-            return False 
