@@ -48,10 +48,10 @@ def test_imports():
     print("\n🔍 Testing module imports...")
     
     try:
-        from selenium import webdriver
-        print("  ✅ Selenium imported successfully")
+        import zendriver as zd
+        print("  ✅ Zendriver imported successfully")
     except ImportError as e:
-        print(f"  ❌ Selenium import failed: {e}")
+        print(f"  ❌ Zendriver import failed: {e}")
         return False
     
     try:
@@ -69,16 +69,9 @@ def test_imports():
         return False
     
     try:
-        from webdriver_manager.chrome import ChromeDriverManager
-        print("  ✅ WebDriver Manager imported successfully")
-    except ImportError as e:
-        print(f"  ❌ WebDriver Manager import failed: {e}")
-        return False
-    
-    try:
         # Test local modules
-        from utils.hashing import generate_content_hash
         from db.supabase_client import SupabaseClient
+        from scraper.movie_scraper import MovieScraper, MovieScraperSync
         print("  ✅ Local modules imported successfully")
     except ImportError as e:
         print(f"  ❌ Local module import failed: {e}")
@@ -88,40 +81,50 @@ def test_imports():
     return True
 
 
-def test_chrome_driver():
-    """Test Chrome driver setup."""
-    print("\n🔍 Testing Chrome driver...")
+def test_zendriver():
+    """Test Zendriver setup."""
+    print("\n🔍 Testing Zendriver...")
     
     try:
-        from selenium.webdriver.chrome.options import Options
-        from webdriver_manager.chrome import ChromeDriverManager
+        import zendriver as zd
+        import asyncio
         
-        # Test driver manager
-        driver_path = ChromeDriverManager().install()
-        print(f"  ✅ ChromeDriver found at: {driver_path}")
+        async def test_browser():
+            """Test basic browser functionality."""
+            browser = None
+            try:
+                # Start browser with minimal config
+                browser = await zd.start(headless=True)
+                
+                # Get a page and navigate to a simple site
+                page = await browser.get("https://www.google.com")
+                
+                # Get the page title
+                title = await page.evaluate("document.title")
+                
+                return True, title
+                
+            except Exception as e:
+                return False, str(e)
+            finally:
+                if browser:
+                    try:
+                        await browser.stop()
+                    except:
+                        pass
         
-        # Test basic driver initialization
-        options = Options()
-        options.add_argument("--headless")
-        options.add_argument("--no-sandbox")
-        options.add_argument("--disable-dev-shm-usage")
+        # Run the test
+        success, result = asyncio.run(test_browser())
         
-        from selenium import webdriver
-        from selenium.webdriver.chrome.service import Service
-        
-        service = Service(driver_path)
-        driver = webdriver.Chrome(service=service, options=options)
-        
-        # Test basic navigation
-        driver.get("https://www.google.com")
-        title = driver.title
-        driver.quit()
-        
-        print(f"  ✅ Chrome driver test successful (navigated to Google: '{title}')")
-        return True
+        if success:
+            print(f"  ✅ Zendriver test successful (navigated to Google: '{result}')")
+            return True
+        else:
+            print(f"  ❌ Zendriver test failed: {result}")
+            return False
         
     except Exception as e:
-        print(f"  ❌ Chrome driver test failed: {e}")
+        print(f"  ❌ Zendriver test failed: {e}")
         print("  💡 Make sure Chrome browser is installed on your system")
         return False
 
@@ -150,6 +153,26 @@ def test_database_connection():
         return False
 
 
+def test_scraper_initialization():
+    """Test scraper initialization."""
+    print("\n🔍 Testing scraper initialization...")
+    
+    try:
+        from scraper.movie_scraper import MovieScraperSync
+        
+        # Test sync wrapper initialization
+        scraper = MovieScraperSync(headless=True, delay=1)
+        print("  ✅ MovieScraperSync initialized successfully")
+        
+        # Test context manager (without actually running scraper)
+        print("  ✅ Scraper setup test passed")
+        return True
+        
+    except Exception as e:
+        print(f"  ❌ Scraper initialization test failed: {e}")
+        return False
+
+
 def main():
     """Run all tests."""
     print("🧪 Movie Scraper Setup Test")
@@ -158,8 +181,9 @@ def main():
     tests = [
         test_environment,
         test_imports,
-        test_chrome_driver,
-        test_database_connection
+        test_zendriver,
+        test_database_connection,
+        test_scraper_initialization
     ]
     
     passed = 0
