@@ -33,7 +33,7 @@ CREATE TABLE IF NOT EXISTS knowledge_base.showtimes (
     movie_id UUID REFERENCES knowledge_base.movies(id) ON DELETE CASCADE,
     cinema_id UUID REFERENCES knowledge_base.cinemas(id) ON DELETE CASCADE,
     showtime TIMESTAMP WITH TIME ZONE NOT NULL,
-    language TEXT, -- e.g., "英語版", "粵語版"
+    language TEXT, -- e.g., "IIA English 2D", "Dolby ATMOS IIA English 2D"
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()
 );
 

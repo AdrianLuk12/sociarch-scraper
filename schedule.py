@@ -36,11 +36,15 @@ def scheduled_scrape_job():
         logger.info("Starting scheduled movie scrape")
         
         start_time = datetime.now()
-        movies = run_scraper()
+        success = run_scraper()
         end_time = datetime.now()
         
         duration = end_time - start_time
-        logger.info(f"Scheduled scrape completed in {duration}. Processed {len(movies)} movies.")
+        
+        if success:
+            logger.info(f"Scheduled scrape completed successfully in {duration}")
+        else:
+            logger.error(f"Scheduled scrape failed after {duration}")
         
     except Exception as e:
         logger.error(f"Scheduled scrape failed: {e}")

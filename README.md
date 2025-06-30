@@ -6,8 +6,10 @@ A scalable and efficient movie data scraper built with Python, Zendriver, and Su
 
 - **Modern Browser Automation**: Uses Zendriver for fast, reliable browser automation
 - **Intelligent Language Handling**: Automatically detects and switches to English interface
-- **Comprehensive Data Extraction**: Scrapes movies, cinemas, and detailed information
+- **Comprehensive Data Extraction**: Scrapes movies, cinemas, detailed information, and showtimes
+- **Automated Showtime Scraping**: Extracts showtimes across multiple dates with language detection
 - **Dual Output Options**: Saves data to both CSV files and Supabase database
+- **Smart Duplicate Prevention**: Checks for existing records to avoid redundant data
 - **Robust Error Handling**: Comprehensive logging and retry mechanisms
 - **Flexible Scheduling**: Automated daily scraping with configurable timing
 - **Database Integration**: Seamless integration with Supabase for data storage
@@ -43,7 +45,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 
 - **movies**: Store movie metadata (name, url, category, description, created_at)
 - **cinemas**: Store cinema information (name, url, address, created_at)
-- **showtimes**: Store showtime data linking movies and cinemas with timestamps and language info
+- **showtimes**: Store comprehensive showtime data linking movies and cinemas with timestamps and language info
 
 ## Installation
 
@@ -121,8 +123,9 @@ This will:
 - Switch interface to English if needed
 - Scrape all movies and cinemas from dropdown menus
 - Extract detailed information for each movie and cinema
+- **Automatically scrape showtimes** for all cinemas across multiple dates
 - Save data to CSV files (`movies.csv`, `cinemas.csv`, `movies_details.csv`, `cinemas_details.csv`)
-- Optionally store data in Supabase database
+- Store comprehensive data in Supabase database including showtime relationships
 
 ### Scheduled Scraping
 
@@ -159,11 +162,21 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
   - Full address information
   - Location details
   - Contact information
+  - **Comprehensive showtime data**
+
+**Showtimes** (Integrated with Cinema Scraping):
+- Processes multiple date buttons on each cinema page
+- Extracts showtimes for all available dates
+- Detects movie language/version (e.g., "英語版", "粵語版")
+- Converts time strings to proper timestamps
+- Links showtimes to existing movies and cinemas in database
+- Handles date parsing and year calculation automatically
 
 ### 3. Data Storage
 - **CSV Output**: Saves data to structured CSV files for easy analysis
 - **Database Storage**: Stores data in Supabase with proper relationships
 - **Duplicate Prevention**: Checks for existing records to avoid duplicates
+- **Showtime Management**: Automatically links showtimes to movies and cinemas
 
 ### 4. Error Handling & Reliability
 - **Retry Logic**: Multiple attempts for navigation and data extraction
@@ -225,7 +238,7 @@ knowledge_base.cinemas (
     created_at TIMESTAMP WITH TIME ZONE
 )
 
--- Showtimes table (for future expansion)
+-- Showtimes table (actively populated)
 knowledge_base.showtimes (
     id UUID PRIMARY KEY,
     movie_id UUID REFERENCES movies(id),
@@ -261,6 +274,13 @@ tail -f movie_scraper_scheduler.log
 
 # Monitor CSV output
 ls -la *.csv
+
+# Monitor showtime scraping progress
+grep "showtime" movie_scraper.log | tail -10
+
+# Check database showtime counts
+# (run in Supabase SQL editor)
+SELECT COUNT(*) as total_showtimes FROM knowledge_base.showtimes;
 ```
 
 ## Development
@@ -273,6 +293,16 @@ The scraper uses a modular architecture:
 - **MovieScraperSync**: Synchronous wrapper for easier usage
 - **SupabaseClient**: Database operations and connection management
 - **Scheduler**: APScheduler integration for automated runs
+
+### Showtime Processing Architecture
+
+The showtime functionality is seamlessly integrated into the cinema scraping workflow:
+
+- **`_scrape_showtimes_for_cinema()`**: Main showtime extraction logic
+- **`_process_movie_showtimes()`**: Processes and saves individual showtimes to database
+- **`_parse_date_text()`**: Converts date strings (e.g., "15/12") to proper date objects
+- **`_convert_to_timestamp()`**: Converts time strings to ISO timestamps compatible with PostgreSQL
+- **Database Integration**: `showtime_exists()` and `add_showtime()` methods prevent duplicates
 
 ### Adding New Features
 
@@ -308,6 +338,18 @@ The scraper uses a modular architecture:
    - The scraper automatically handles Chinese to English switching
    - Check logs for language detection messages
    - Verify the language switcher element is available on the page
+
+5. **Showtime Scraping Issues**
+   ```bash
+   # Check if showtimes are being processed
+   grep "Scraping showtimes" movie_scraper.log
+   
+   # Check for date parsing errors
+   grep "Could not parse date" movie_scraper.log
+   
+   # Monitor showtime processing statistics
+   grep "added.*skipped" movie_scraper.log
+   ```
 
 ### Debug Mode
 
