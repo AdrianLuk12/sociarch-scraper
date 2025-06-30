@@ -80,6 +80,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
    SUPABASE_SERVICE_KEY=your_supabase_service_role_key  # Optional
    SCRAPER_DELAY=2
    HEADLESS_MODE=false
+   NO_SANDBOX=false
    ```
 
 ## Environment Variables
@@ -93,6 +94,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 - `SUPABASE_SERVICE_KEY`: Service role key for admin operations
 - `SCRAPER_DELAY`: Delay between requests in seconds (default: 2)
 - `HEADLESS_MODE`: Run browser in headless mode (default: 'false')
+- `NO_SANDBOX`: Disable Chrome sandbox mode for containerized environments (default: 'false')
 
 ## Usage
 
@@ -191,6 +193,7 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 # In scraper/main.py
 headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'
 scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
+no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
 ```
 
 ### Scheduling Configuration

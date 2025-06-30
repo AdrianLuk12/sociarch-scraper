@@ -53,11 +53,15 @@ class MovieScraper:
                 # "--no-sandbox"
             ]
             
+            # Read NO_SANDBOX from environment
+            no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
+            
             # Start browser with zendriver using correct parameter names
             self.browser = await zd.start(
                 headless=self.headless,
                 browser_args=browser_args,
-                lang="en-US"
+                lang="en-US",
+                no_sandbox=no_sandbox
             )
             
             logger.info("Zendriver browser initialized successfully")

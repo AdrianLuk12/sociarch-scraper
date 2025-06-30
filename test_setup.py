@@ -15,7 +15,7 @@ def test_environment():
     load_dotenv(find_dotenv())
     
     required_vars = ['SUPABASE_URL', 'SUPABASE_KEY']
-    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'SCRAPER_DELAY', 'HEADLESS_MODE']
+    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'SCRAPER_DELAY', 'HEADLESS_MODE', 'NO_SANDBOX']
     
     missing_required = []
     
@@ -93,8 +93,11 @@ def test_zendriver():
             """Test basic browser functionality."""
             browser = None
             try:
+                # Read NO_SANDBOX from environment
+                no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
+                
                 # Start browser with minimal config
-                browser = await zd.start(headless=True)
+                browser = await zd.start(headless=True, no_sandbox=no_sandbox)
                 
                 # Get a page and navigate to a simple site
                 page = await browser.get("https://www.google.com")
