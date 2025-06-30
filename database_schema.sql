@@ -52,8 +52,6 @@ GRANT SELECT, INSERT, UPDATE, DELETE ON knowledge_base.showtimes TO authenticate
 
 -- Create indexes for better performance
 CREATE INDEX IF NOT EXISTS idx_movies_name ON knowledge_base.movies(name);
-
-CREATE INDEX IF NOT EXISTS idx_movies_last_updated ON knowledge_base.movies(last_updated);
 CREATE INDEX IF NOT EXISTS idx_cinemas_name ON knowledge_base.cinemas(name);
 CREATE INDEX IF NOT EXISTS idx_showtimes_movie_id ON knowledge_base.showtimes(movie_id);
 CREATE INDEX IF NOT EXISTS idx_showtimes_cinema_id ON knowledge_base.showtimes(cinema_id);
