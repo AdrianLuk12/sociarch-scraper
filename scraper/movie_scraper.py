@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class MovieScraper:
     """Movie scraper for hkmovie6.com using Zendriver"""
     
-    def __init__(self, headless: bool = True, delay: float = 2):
+    def __init__(self, headless: bool = False, delay: float = 2):
         """
         Initialize the movie scraper.
         

@@ -40,7 +40,7 @@ def run_scraper():
         
         # Get configuration from environment
         scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
-        headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'
+        headless_mode = os.getenv('HEADLESS_MODE', 'false').lower() == 'true'
         
         # Initialize and test scraper using sync wrapper
         with MovieScraperSync(headless=headless_mode, delay=scraper_delay) as scraper:

@@ -79,7 +79,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
    SUPABASE_SCHEMA=knowledge_base
    SUPABASE_SERVICE_KEY=your_supabase_service_role_key  # Optional
    SCRAPER_DELAY=2
-   HEADLESS_MODE=true
+   HEADLESS_MODE=false
    ```
 
 ## Environment Variables
@@ -92,7 +92,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 - `SUPABASE_SCHEMA`: Database schema name (default: 'knowledge_base')
 - `SUPABASE_SERVICE_KEY`: Service role key for admin operations
 - `SCRAPER_DELAY`: Delay between requests in seconds (default: 2)
-- `HEADLESS_MODE`: Run browser in headless mode (default: 'true')
+- `HEADLESS_MODE`: Run browser in headless mode (default: 'false')
 
 ## Usage
 
