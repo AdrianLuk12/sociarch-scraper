@@ -81,6 +81,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
    SCRAPER_DELAY=2
    HEADLESS_MODE=false
    NO_SANDBOX=false
+   SCRAPER_TIMEOUT=60
    ```
 
 ## Environment Variables
@@ -95,6 +96,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 - `SCRAPER_DELAY`: Delay between requests in seconds (default: 2)
 - `HEADLESS_MODE`: Run browser in headless mode (default: 'false')
 - `NO_SANDBOX`: Disable Chrome sandbox mode for containerized environments (default: 'false')
+- `SCRAPER_TIMEOUT`: Timeout for individual detail page scraping in seconds, restarts browser on timeout (default: 60)
 
 ## Usage
 
@@ -194,6 +196,7 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'
 scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
 no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
+scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '60'))
 ```
 
 ### Scheduling Configuration
@@ -353,6 +356,21 @@ The showtime functionality is seamlessly integrated into the cinema scraping wor
    # Monitor showtime processing statistics
    grep "added.*skipped" movie_scraper.log
    ```
+
+6. **Timeout and Browser Restart Issues**
+   ```bash
+   # Check for timeout events
+   grep "Timeout" movie_scraper.log
+   
+   # Monitor browser restart events
+   grep "Restarting browser" movie_scraper.log
+   
+   # Adjust timeout if pages load slowly
+   export SCRAPER_TIMEOUT=120  # Increase to 2 minutes
+   ```
+   - If you see frequent timeouts, increase `SCRAPER_TIMEOUT` value
+   - Browser automatically restarts when individual detail pages timeout
+   - One retry is attempted after browser restart before marking as failed
 
 ### Debug Mode
 

@@ -32,6 +32,8 @@ class MovieScraper:
         self.browser = None
         self.page = None
         self.db_client = SupabaseClient()
+        # Read timeout from environment (default: 60 seconds)
+        self.scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '60'))
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -78,6 +80,29 @@ class MovieScraper:
                 logger.info("Browser closed successfully")
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
+    
+    async def _restart_browser(self):
+        """Restart the browser after timeout or failure"""
+        try:
+            logger.warning("Restarting browser due to timeout or failure...")
+            
+            # Close existing browser
+            await self.close()
+            
+            # Setup new browser
+            await self._setup_browser()
+            
+            # Navigate back to homepage
+            success = await self.navigate_to_homepage()
+            if not success:
+                logger.error("Failed to navigate to homepage after browser restart")
+                raise Exception("Browser restart failed - could not navigate to homepage")
+            
+            logger.info("Browser restarted successfully")
+            
+        except Exception as e:
+            logger.error(f"Error restarting browser: {e}")
+            raise
     
     async def navigate_to_homepage(self) -> bool:
         """
@@ -529,7 +554,7 @@ class MovieScraper:
 
     async def scrape_movie_details(self, movie_name: str, movie_url: str) -> Dict[str, str]:
         """
-        Scrape detailed information for a specific movie
+        Scrape detailed information for a specific movie with timeout and browser restart
         
         Args:
             movie_name: Name of the movie
@@ -539,50 +564,32 @@ class MovieScraper:
             Dictionary with movie details
         """
         try:
-            logger.info(f"Scraping details for movie: {movie_name}")
+            logger.info(f"Scraping details for movie: {movie_name} (timeout: {self.scraper_timeout}s)")
             
-            # Navigate to movie page
-            await self.page.get(movie_url)
-            await asyncio.sleep(2)
+            # Wrap the scraping logic with timeout
+            return await asyncio.wait_for(
+                self._scrape_movie_details_internal(movie_name, movie_url),
+                timeout=self.scraper_timeout
+            )
             
-            # Scrape genre/category
-            category = await self.page.evaluate("""
-                (() => {
-                    const sectionContainer = document.querySelector('div.flex.flex-row.flex-wrap.sectionContainer.items-center');
-                    if (sectionContainer) {
-                        // Check if there's an h2 element at the same level that says "Genres"
-                        const h2Element = sectionContainer.querySelector('h2');
-                        if (h2Element && h2Element.textContent.trim().toLowerCase() === 'genres') {
-                            const h3Element = sectionContainer.querySelector('h3');
-                            return h3Element ? h3Element.textContent.trim() : '';
-                        }
-                    }
-                    return 'Unknown';
-                })()
-            """)
-            
-            # Scrape description
-            description = await self.page.evaluate("""
-                (() => {
-                    const synopsisContainer = document.querySelector('div.synopsis.desktop-only');
-                    if (synopsisContainer) {
-                        const firstDiv = synopsisContainer.querySelector('div');
-                        return firstDiv ? firstDiv.textContent.trim() : '';
-                    }
-                    return '';
-                })()
-            """)
-            
-            # Sanitize the description
-            sanitized_description = self._sanitize_csv_text(description)
-            
-            return {
-                'name': movie_name,
-                'url': movie_url,
-                'category': category or 'Unknown',
-                'description': sanitized_description or 'No description available'
-            }
-            
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
+            try:
+                await self._restart_browser()
+                # Retry once after browser restart
+                logger.info(f"Retrying movie details scraping for: {movie_name}")
+                return await asyncio.wait_for(
+                    self._scrape_movie_details_internal(movie_name, movie_url),
+                    timeout=self.scraper_timeout
+                )
+            except Exception as restart_error:
+                logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
+                return {
+                    'name': movie_name,
+                    'url': movie_url,
+                    'category': 'Timeout Error',
+                    'description': 'Timeout error - browser restart failed'
+                }
         except Exception as e:
             logger.error(f"Error scraping details for movie {movie_name}: {e}")
             return {
@@ -591,10 +598,63 @@ class MovieScraper:
                 'category': 'Error',
                 'description': 'Error retrieving description'
             }
+    
+    async def _scrape_movie_details_internal(self, movie_name: str, movie_url: str) -> Dict[str, str]:
+        """
+        Internal method for scraping movie details (called by scrape_movie_details with timeout)
+        
+        Args:
+            movie_name: Name of the movie
+            movie_url: URL of the movie page
+            
+        Returns:
+            Dictionary with movie details
+        """
+        # Navigate to movie page
+        await self.page.get(movie_url)
+        await asyncio.sleep(2)
+        
+        # Scrape genre/category
+        category = await self.page.evaluate("""
+            (() => {
+                const sectionContainer = document.querySelector('div.flex.flex-row.flex-wrap.sectionContainer.items-center');
+                if (sectionContainer) {
+                    // Check if there's an h2 element at the same level that says "Genres"
+                    const h2Element = sectionContainer.querySelector('h2');
+                    if (h2Element && h2Element.textContent.trim().toLowerCase() === 'genres') {
+                        const h3Element = sectionContainer.querySelector('h3');
+                        return h3Element ? h3Element.textContent.trim() : '';
+                    }
+                }
+                return 'Unknown';
+            })()
+        """)
+        
+        # Scrape description
+        description = await self.page.evaluate("""
+            (() => {
+                const synopsisContainer = document.querySelector('div.synopsis.desktop-only');
+                if (synopsisContainer) {
+                    const firstDiv = synopsisContainer.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim() : '';
+                }
+                return '';
+            })()
+        """)
+        
+        # Sanitize the description
+        sanitized_description = self._sanitize_csv_text(description)
+        
+        return {
+            'name': movie_name,
+            'url': movie_url,
+            'category': category or 'Unknown',
+            'description': sanitized_description or 'No description available'
+        }
 
     async def scrape_cinema_details(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
         """
-        Scrape detailed information for a specific cinema and its showtimes
+        Scrape detailed information for a specific cinema and its showtimes with timeout and browser restart
         
         Args:
             cinema_name: Name of the cinema
@@ -604,62 +664,31 @@ class MovieScraper:
             Dictionary with cinema details
         """
         try:
-            logger.info(f"Scraping details for cinema: {cinema_name}")
+            logger.info(f"Scraping details for cinema: {cinema_name} (timeout: {self.scraper_timeout}s)")
             
-            # Navigate to cinema page
-            await self.page.get(cinema_url)
-            await asyncio.sleep(2)
+            # Wrap the scraping logic with timeout
+            return await asyncio.wait_for(
+                self._scrape_cinema_details_internal(cinema_name, cinema_url),
+                timeout=self.scraper_timeout
+            )
             
-            # Scrape address (excluding the favorite button)
-            address = await self.page.evaluate("""
-                (() => {
-                    const addressElements = document.querySelectorAll('div.sub.f.ai-center');
-                    if (addressElements.length > 0) {
-                        const addressDiv = addressElements[0];
-                        
-                        // Clone the element to avoid modifying the original
-                        const clonedDiv = addressDiv.cloneNode(true);
-                        
-                        // Remove any button elements (like the favorite button)
-                        const buttons = clonedDiv.querySelectorAll('button');
-                        buttons.forEach(button => button.remove());
-                        
-                        // Remove any img elements (location icon)
-                        const images = clonedDiv.querySelectorAll('img');
-                        images.forEach(img => img.remove());
-                        
-                        // Get the clean text content
-                        return clonedDiv.textContent.trim();
-                    }
-                    return '';
-                })()
-            """)
-            
-            # Sanitize the address
-            sanitized_address = self._sanitize_csv_text(address)
-            
-            # Get cinema_id from database (cinema should already exist)
-            cinema_data = self.db_client.get_cinema_by_name(cinema_name)
-            if not cinema_data:
-                logger.error(f"Cinema '{cinema_name}' not found in database")
+        except asyncio.TimeoutError:
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
+            try:
+                await self._restart_browser()
+                # Retry once after browser restart
+                logger.info(f"Retrying cinema details scraping for: {cinema_name}")
+                return await asyncio.wait_for(
+                    self._scrape_cinema_details_internal(cinema_name, cinema_url),
+                    timeout=self.scraper_timeout
+                )
+            except Exception as restart_error:
+                logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
                 return {
                     'name': cinema_name,
                     'url': cinema_url,
-                    'address': sanitized_address or 'Address not available'
+                    'address': 'Timeout error - browser restart failed'
                 }
-            
-            cinema_id = cinema_data['id']
-            logger.info(f"Found cinema in database with ID: {cinema_id}")
-            
-            # Now scrape showtimes on the same page
-            await self._scrape_showtimes_for_cinema(cinema_id, cinema_name)
-            
-            return {
-                'name': cinema_name,
-                'url': cinema_url,
-                'address': sanitized_address or 'Address not available'
-            }
-            
         except Exception as e:
             logger.error(f"Error scraping details for cinema {cinema_name}: {e}")
             return {
@@ -667,6 +696,71 @@ class MovieScraper:
                 'url': cinema_url,
                 'address': 'Error retrieving address'
             }
+    
+    async def _scrape_cinema_details_internal(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
+        """
+        Internal method for scraping cinema details (called by scrape_cinema_details with timeout)
+        
+        Args:
+            cinema_name: Name of the cinema
+            cinema_url: URL of the cinema page
+            
+        Returns:
+            Dictionary with cinema details
+        """
+        # Navigate to cinema page
+        await self.page.get(cinema_url)
+        await asyncio.sleep(2)
+        
+        # Scrape address (excluding the favorite button)
+        address = await self.page.evaluate("""
+            (() => {
+                const addressElements = document.querySelectorAll('div.sub.f.ai-center');
+                if (addressElements.length > 0) {
+                    const addressDiv = addressElements[0];
+                    
+                    // Clone the element to avoid modifying the original
+                    const clonedDiv = addressDiv.cloneNode(true);
+                    
+                    // Remove any button elements (like the favorite button)
+                    const buttons = clonedDiv.querySelectorAll('button');
+                    buttons.forEach(button => button.remove());
+                    
+                    // Remove any img elements (location icon)
+                    const images = clonedDiv.querySelectorAll('img');
+                    images.forEach(img => img.remove());
+                    
+                    // Get the clean text content
+                    return clonedDiv.textContent.trim();
+                }
+                return '';
+            })()
+        """)
+        
+        # Sanitize the address
+        sanitized_address = self._sanitize_csv_text(address)
+        
+        # Get cinema_id from database (cinema should already exist)
+        cinema_data = self.db_client.get_cinema_by_name(cinema_name)
+        if not cinema_data:
+            logger.error(f"Cinema '{cinema_name}' not found in database")
+            return {
+                'name': cinema_name,
+                'url': cinema_url,
+                'address': sanitized_address or 'Address not available'
+            }
+        
+        cinema_id = cinema_data['id']
+        logger.info(f"Found cinema in database with ID: {cinema_id}")
+        
+        # Now scrape showtimes on the same page
+        await self._scrape_showtimes_for_cinema(cinema_id, cinema_name)
+        
+        return {
+            'name': cinema_name,
+            'url': cinema_url,
+            'address': sanitized_address or 'Address not available'
+        }
     
     async def _scrape_showtimes_for_cinema(self, cinema_id: str, cinema_name: str):
         """

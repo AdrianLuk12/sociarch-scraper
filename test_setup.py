@@ -15,7 +15,7 @@ def test_environment():
     load_dotenv(find_dotenv())
     
     required_vars = ['SUPABASE_URL', 'SUPABASE_KEY']
-    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'SCRAPER_DELAY', 'HEADLESS_MODE', 'NO_SANDBOX']
+    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'SCRAPER_DELAY', 'HEADLESS_MODE', 'NO_SANDBOX', 'SCRAPER_TIMEOUT']
     
     missing_required = []
     
