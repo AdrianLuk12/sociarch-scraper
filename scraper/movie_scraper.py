@@ -81,6 +81,33 @@ class MovieScraper:
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
     
+    def _is_connection_error(self, error: Exception) -> bool:
+        """
+        Check if the error is a connection failure that requires browser restart
+        
+        Args:
+            error: The exception to check
+            
+        Returns:
+            True if this is a connection error that requires restart
+        """
+        error_str = str(error).lower()
+        
+        # Common connection error patterns
+        connection_patterns = [
+            'connect call failed',  # Errno 111
+            'connection refused',   # Connection refused
+            'connection reset',     # Connection reset by peer
+            'broken pipe',          # Broken pipe
+            'target closed',        # Browser/page closed
+            'session not created',  # Browser session issues
+            'chrome not reachable', # Chrome unreachable
+            'no such session',      # Session lost
+            'invalid session id',   # Invalid session
+        ]
+        
+        return any(pattern in error_str for pattern in connection_patterns)
+    
     async def _restart_browser(self):
         """Restart the browser after timeout or failure"""
         try:
@@ -576,6 +603,8 @@ class MovieScraper:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
             try:
                 await self._restart_browser()
+                # Small delay after restart to let browser stabilize
+                await asyncio.sleep(2)
                 # Retry once after browser restart
                 logger.info(f"Retrying movie details scraping for: {movie_name}")
                 return await asyncio.wait_for(
@@ -591,13 +620,36 @@ class MovieScraper:
                     'description': 'Timeout error - browser restart failed'
                 }
         except Exception as e:
-            logger.error(f"Error scraping details for movie {movie_name}: {e}")
-            return {
-                'name': movie_name,
-                'url': movie_url,
-                'category': 'Error',
-                'description': 'Error retrieving description'
-            }
+            # Check if this is a connection error that requires browser restart
+            if self._is_connection_error(e):
+                logger.error(f"Connection error scraping movie details for {movie_name}: {e}")
+                logger.warning("Detected connection failure, restarting browser...")
+                try:
+                    await self._restart_browser()
+                    # Small delay after restart to let browser stabilize
+                    await asyncio.sleep(2)
+                    # Retry once after browser restart
+                    logger.info(f"Retrying movie details scraping after connection error for: {movie_name}")
+                    return await asyncio.wait_for(
+                        self._scrape_movie_details_internal(movie_name, movie_url),
+                        timeout=self.scraper_timeout
+                    )
+                except Exception as restart_error:
+                    logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
+                    return {
+                        'name': movie_name,
+                        'url': movie_url,
+                        'category': 'Connection Error',
+                        'description': 'Connection error - browser restart failed'
+                    }
+            else:
+                logger.error(f"Error scraping details for movie {movie_name}: {e}")
+                return {
+                    'name': movie_name,
+                    'url': movie_url,
+                    'category': 'Error',
+                    'description': 'Error retrieving description'
+                }
     
     async def _scrape_movie_details_internal(self, movie_name: str, movie_url: str) -> Dict[str, str]:
         """
@@ -676,6 +728,8 @@ class MovieScraper:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
             try:
                 await self._restart_browser()
+                # Small delay after restart to let browser stabilize
+                await asyncio.sleep(2)
                 # Retry once after browser restart
                 logger.info(f"Retrying cinema details scraping for: {cinema_name}")
                 return await asyncio.wait_for(
@@ -690,12 +744,34 @@ class MovieScraper:
                     'address': 'Timeout error - browser restart failed'
                 }
         except Exception as e:
-            logger.error(f"Error scraping details for cinema {cinema_name}: {e}")
-            return {
-                'name': cinema_name,
-                'url': cinema_url,
-                'address': 'Error retrieving address'
-            }
+            # Check if this is a connection error that requires browser restart
+            if self._is_connection_error(e):
+                logger.error(f"Connection error scraping cinema details for {cinema_name}: {e}")
+                logger.warning("Detected connection failure, restarting browser...")
+                try:
+                    await self._restart_browser()
+                    # Small delay after restart to let browser stabilize
+                    await asyncio.sleep(2)
+                    # Retry once after browser restart
+                    logger.info(f"Retrying cinema details scraping after connection error for: {cinema_name}")
+                    return await asyncio.wait_for(
+                        self._scrape_cinema_details_internal(cinema_name, cinema_url),
+                        timeout=self.scraper_timeout
+                    )
+                except Exception as restart_error:
+                    logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
+                    return {
+                        'name': cinema_name,
+                        'url': cinema_url,
+                        'address': 'Connection error - browser restart failed'
+                    }
+            else:
+                logger.error(f"Error scraping details for cinema {cinema_name}: {e}")
+                return {
+                    'name': cinema_name,
+                    'url': cinema_url,
+                    'address': 'Error retrieving address'
+                }
     
     async def _scrape_cinema_details_internal(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
         """

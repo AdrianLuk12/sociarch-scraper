@@ -185,7 +185,9 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 ### 4. Error Handling & Reliability
 - **Retry Logic**: Multiple attempts for navigation and data extraction
 - **Language Detection**: Handles both English and Chinese interfaces
-- **Connection Recovery**: Automatic browser restart on failures
+- **Connection Recovery**: Automatic browser restart on connection failures and timeouts
+- **Intelligent Error Detection**: Recognizes different types of failures (timeouts vs connection errors)
+- **Graceful Degradation**: Continues processing remaining items after failures
 - **Comprehensive Logging**: Detailed logs for monitoring and debugging
 
 ## Configuration Options
@@ -310,6 +312,17 @@ The showtime functionality is seamlessly integrated into the cinema scraping wor
 - **`_convert_to_timestamp()`**: Converts time strings to ISO timestamps compatible with PostgreSQL
 - **Database Integration**: `showtime_exists()` and `add_showtime()` methods prevent duplicates
 
+### Error Recovery Architecture
+
+The scraper includes robust error handling for different failure scenarios:
+
+- **`_is_connection_error()`**: Detects connection failures (Errno 111, session lost, etc.)
+- **Timeout Detection**: Uses `asyncio.wait_for()` to catch hanging operations
+- **`_restart_browser()`**: Handles complete browser restart and homepage navigation
+- **Dual Recovery Paths**: Separate handling for timeouts vs connection failures
+- **Batch Resilience**: Individual failures don't stop the entire scraping process
+- **Progressive Retry**: One retry attempt after browser restart, then graceful failure
+
 ### Adding New Features
 
 1. **New Data Fields**: Update database schema and extraction methods
@@ -365,12 +378,17 @@ The showtime functionality is seamlessly integrated into the cinema scraping wor
    # Monitor browser restart events
    grep "Restarting browser" movie_scraper.log
    
+   # Check for connection failures
+   grep "Connection error\|Connect call failed" movie_scraper.log
+   
    # Adjust timeout if pages load slowly
    export SCRAPER_TIMEOUT=120  # Increase to 2 minutes
    ```
    - If you see frequent timeouts, increase `SCRAPER_TIMEOUT` value
    - Browser automatically restarts when individual detail pages timeout
+   - **Connection failures** (like `Errno 111 Connect call failed`) trigger automatic browser restart
    - One retry is attempted after browser restart before marking as failed
+   - Batch processing continues with the next item after failures
 
 ### Debug Mode
 
@@ -387,15 +405,3 @@ python scraper/main.py
 - Adjust `SCRAPER_DELAY` to balance speed vs. reliability
 - Use headless mode (`HEADLESS_MODE=true`) for better performance
 - Monitor system resources during large scraping operations
-
-## License
-
-This project is for educational and research purposes. Please respect the website's robots.txt and terms of service when scraping.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Test your changes with `python test_setup.py`
-4. Add tests for new functionality  
-5. Submit a pull request 
