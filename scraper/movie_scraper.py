@@ -693,11 +693,19 @@ class MovieScraper:
         try:
             logger.info(f"Scraping details for movie: {movie_name} (timeout: {self.scraper_timeout}s)")
             
+            # Log RAM before scraping this movie
+            self._log_ram_status(f"Before Movie: {movie_name}")
+            
             # Wrap the scraping logic with timeout
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self._scrape_movie_details_internal(movie_name, movie_url),
                 timeout=self.scraper_timeout
             )
+            
+            # Log RAM after scraping this movie
+            self._log_ram_status(f"After Movie: {movie_name}")
+            
+            return result
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
@@ -818,11 +826,19 @@ class MovieScraper:
         try:
             logger.info(f"Scraping details for cinema: {cinema_name} (timeout: {self.scraper_timeout}s)")
             
+            # Log RAM before scraping this cinema
+            self._log_ram_status(f"Before Cinema: {cinema_name}")
+            
             # Wrap the scraping logic with timeout
-            return await asyncio.wait_for(
+            result = await asyncio.wait_for(
                 self._scrape_cinema_details_internal(cinema_name, cinema_url),
                 timeout=self.scraper_timeout
             )
+            
+            # Log RAM after scraping this cinema (including showtimes)
+            self._log_ram_status(f"After Cinema: {cinema_name}")
+            
+            return result
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
@@ -1256,10 +1272,6 @@ class MovieScraper:
                 # logger.info(f"Saved details for movie: {movie_name}")
                 movies_processed += 1
                 
-                # Log RAM status every 10 movies
-                if movies_processed % 10 == 0:
-                    self._log_ram_status(f"Movie Progress: {movies_processed}/{len(movies)}")
-                
                 # Small delay between requests to be respectful
                 await asyncio.sleep(1)
             
@@ -1351,10 +1363,6 @@ class MovieScraper:
                     csvfile.flush()  # Ensure data is written to disk immediately
                 
                 cinemas_processed += 1
-                
-                # Log RAM status every 5 cinemas (since cinema processing includes showtimes and is more intensive)
-                if cinemas_processed % 5 == 0:
-                    self._log_ram_status(f"Cinema Progress: {cinemas_processed}/{len(cinemas)}")
                 
                 # Small delay between requests to be respectful
                 await asyncio.sleep(1)
