@@ -188,6 +188,7 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 - **Connection Recovery**: Automatic browser restart on connection failures and timeouts
 - **Intelligent Error Detection**: Recognizes different types of failures (timeouts vs connection errors)
 - **Graceful Degradation**: Continues processing remaining items after failures
+- **Memory Monitoring**: Real-time RAM usage tracking using vmstat (Amazon Linux compatible)
 - **Comprehensive Logging**: Detailed logs for monitoring and debugging
 
 ## Configuration Options
@@ -316,12 +317,13 @@ The showtime functionality is seamlessly integrated into the cinema scraping wor
 
 The scraper includes robust error handling for different failure scenarios:
 
-- **`_is_connection_error()`**: Detects connection failures (Errno 111, session lost, etc.)
+- **`_is_connection_error()`**: Detects connection failures (Errno 111, browser crashes, "Failed to connect to browser", etc.)
 - **Timeout Detection**: Uses `asyncio.wait_for()` to catch hanging operations
 - **`_restart_browser()`**: Handles complete browser restart and homepage navigation
 - **Dual Recovery Paths**: Separate handling for timeouts vs connection failures
+- **Cascading Restart Recovery**: If browser restart itself fails, attempts one additional restart
 - **Batch Resilience**: Individual failures don't stop the entire scraping process
-- **Progressive Retry**: One retry attempt after browser restart, then graceful failure
+- **Progressive Retry**: Up to two restart attempts per failed item, then graceful failure
 
 ### Adding New Features
 
@@ -379,16 +381,49 @@ The scraper includes robust error handling for different failure scenarios:
    grep "Restarting browser" movie_scraper.log
    
    # Check for connection failures
-   grep "Connection error\|Connect call failed" movie_scraper.log
+   grep "Connection error\|Connect call failed\|Failed to connect to browser" movie_scraper.log
+   
+   # Monitor cascading restart failures
+   grep "attempting one more restart\|Second restart" movie_scraper.log
    
    # Adjust timeout if pages load slowly
    export SCRAPER_TIMEOUT=120  # Increase to 2 minutes
    ```
    - If you see frequent timeouts, increase `SCRAPER_TIMEOUT` value
    - Browser automatically restarts when individual detail pages timeout
-   - **Connection failures** (like `Errno 111 Connect call failed`) trigger automatic browser restart
-   - One retry is attempted after browser restart before marking as failed
+   - **Connection failures** (like `Errno 111 Connect call failed`, `Failed to connect to browser`) trigger automatic browser restart
+   - **Cascading restart failures**: If browser restart itself fails with connection error, attempts one additional restart
+   - Up to two restart attempts per failed item before marking as failed
    - Batch processing continues with the next item after failures
+
+7. **Memory Monitoring and Issues**
+   ```bash
+   # Monitor RAM usage during scraping
+   grep "RAM Status" movie_scraper.log
+   
+   # Check for memory warnings
+   grep "High memory usage\|Low available memory" movie_scraper.log
+   
+   # Monitor individual item processing
+   grep "Before Movie:\|After Movie:\|Before Cinema:\|After Cinema:" movie_scraper.log
+   
+   # Track memory delta for specific items
+   grep -A1 "Before Movie: Wicked" movie_scraper.log | grep -E "(Before|After)"
+   
+   # Monitor memory during browser operations
+   grep "Before Browser\|After Browser\|Before.*Restart\|After.*Restart" movie_scraper.log
+   
+   # Example RAM status logs:
+   # [Starting Movie Details Scraping] RAM Status: Available: 1520MB, Used: 2048MB (57.3%), Total: 3568MB
+   # [Before Movie: Wicked] RAM Status: Available: 1200MB, Used: 2368MB (66.4%), Total: 3568MB
+   # [After Movie: Wicked] RAM Status: Available: 1150MB, Used: 2418MB (67.8%), Total: 3568MB
+   # [Before Cinema: AMC Pacific Place] RAM Status: Available: 1100MB, Used: 2468MB (69.2%), Total: 3568MB
+   # [After Cinema: AMC Pacific Place] RAM Status: Available: 950MB, Used: 2618MB (73.4%), Total: 3568MB
+   ```
+   - RAM status is logged using `vmstat` (Amazon Linux compatible)
+   - Monitoring occurs at: browser setup, restarts, batch start/completion, **and every individual movie/cinema**
+   - Warnings are logged if memory usage exceeds 85% or available memory drops below 100MB
+   - Detailed tracking shows memory consumption for each scraped item
 
 ### Debug Mode
 

@@ -189,15 +189,19 @@ class MovieScraper:
         
         # Common connection error patterns
         connection_patterns = [
-            'connect call failed',  # Errno 111
-            'connection refused',   # Connection refused
-            'connection reset',     # Connection reset by peer
-            'broken pipe',          # Broken pipe
-            'target closed',        # Browser/page closed
-            'session not created',  # Browser session issues
-            'chrome not reachable', # Chrome unreachable
-            'no such session',      # Session lost
-            'invalid session id',   # Invalid session
+            'connect call failed',     # Errno 111
+            'connection refused',      # Connection refused
+            'connection reset',        # Connection reset by peer
+            'broken pipe',            # Broken pipe
+            'target closed',          # Browser/page closed
+            'session not created',    # Browser session issues
+            'chrome not reachable',   # Chrome unreachable
+            'no such session',        # Session lost
+            'invalid session id',     # Invalid session
+            'failed to connect to browser',  # Browser connection failure
+            'browser process died',   # Browser process terminated
+            'browser crashed',        # Browser crash
+            'chrome has crashed',     # Chrome crash
         ]
         
         return any(pattern in error_str for pattern in connection_patterns)
@@ -721,6 +725,21 @@ class MovieScraper:
                 )
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
+                
+                # Check if the restart error itself is a connection error that needs another restart
+                if self._is_connection_error(restart_error):
+                    logger.warning(f"Browser restart failed with connection error for movie {movie_name} (timeout case), attempting one more restart...")
+                    try:
+                        # Attempt another browser restart
+                        await self._restart_browser()
+                        logger.info(f"Second restart successful, retrying movie details scraping for: {movie_name}")
+                        return await asyncio.wait_for(
+                            self._scrape_movie_details_internal(movie_name, movie_url),
+                            timeout=self.scraper_timeout
+                        )
+                    except Exception as second_restart_error:
+                        logger.error(f"Second browser restart also failed for movie {movie_name} (timeout case): {second_restart_error}")
+                
                 return {
                     'name': movie_name,
                     'url': movie_url,
@@ -744,6 +763,21 @@ class MovieScraper:
                     )
                 except Exception as restart_error:
                     logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
+                    
+                    # Check if the restart error itself is a connection error that needs another restart
+                    if self._is_connection_error(restart_error):
+                        logger.warning(f"Browser restart failed with connection error for movie {movie_name}, attempting one more restart...")
+                        try:
+                            # Attempt another browser restart
+                            await self._restart_browser()
+                            logger.info(f"Second restart successful, retrying movie details scraping for: {movie_name}")
+                            return await asyncio.wait_for(
+                                self._scrape_movie_details_internal(movie_name, movie_url),
+                                timeout=self.scraper_timeout
+                            )
+                        except Exception as second_restart_error:
+                            logger.error(f"Second browser restart also failed for movie {movie_name}: {second_restart_error}")
+                    
                     return {
                         'name': movie_name,
                         'url': movie_url,
@@ -854,6 +888,21 @@ class MovieScraper:
                 )
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
+                
+                # Check if the restart error itself is a connection error that needs another restart
+                if self._is_connection_error(restart_error):
+                    logger.warning(f"Browser restart failed with connection error for cinema {cinema_name} (timeout case), attempting one more restart...")
+                    try:
+                        # Attempt another browser restart
+                        await self._restart_browser()
+                        logger.info(f"Second restart successful, retrying cinema details scraping for: {cinema_name}")
+                        return await asyncio.wait_for(
+                            self._scrape_cinema_details_internal(cinema_name, cinema_url),
+                            timeout=self.scraper_timeout
+                        )
+                    except Exception as second_restart_error:
+                        logger.error(f"Second browser restart also failed for cinema {cinema_name} (timeout case): {second_restart_error}")
+                
                 return {
                     'name': cinema_name,
                     'url': cinema_url,
@@ -876,6 +925,21 @@ class MovieScraper:
                     )
                 except Exception as restart_error:
                     logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
+                    
+                    # Check if the restart error itself is a connection error that needs another restart
+                    if self._is_connection_error(restart_error):
+                        logger.warning(f"Browser restart failed with connection error for cinema {cinema_name}, attempting one more restart...")
+                        try:
+                            # Attempt another browser restart
+                            await self._restart_browser()
+                            logger.info(f"Second restart successful, retrying cinema details scraping for: {cinema_name}")
+                            return await asyncio.wait_for(
+                                self._scrape_cinema_details_internal(cinema_name, cinema_url),
+                                timeout=self.scraper_timeout
+                            )
+                        except Exception as second_restart_error:
+                            logger.error(f"Second browser restart also failed for cinema {cinema_name}: {second_restart_error}")
+                    
                     return {
                         'name': cinema_name,
                         'url': cinema_url,
