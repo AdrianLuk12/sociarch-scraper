@@ -187,8 +187,11 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 - **Language Detection**: Handles both English and Chinese interfaces
 - **Connection Recovery**: Automatic browser restart on connection failures and timeouts
 - **Intelligent Error Detection**: Recognizes different types of failures (timeouts vs connection errors)
+- **Anti-Bot Detection**: Automatic detection of Cloudflare, CAPTCHA, and access restrictions
+- **Timeout Diagnosis**: Analyzes page state during timeouts to identify blocking causes
 - **Graceful Degradation**: Continues processing remaining items after failures
 - **Memory Monitoring**: Real-time RAM usage tracking using vmstat (Amazon Linux compatible)
+- **Enhanced Stealth**: Advanced browser configuration to reduce bot detection
 - **Comprehensive Logging**: Detailed logs for monitoring and debugging
 
 ## Configuration Options
@@ -424,6 +427,39 @@ The scraper includes robust error handling for different failure scenarios:
    - Monitoring occurs at: browser setup, restarts, batch start/completion, **and every individual movie/cinema**
    - Warnings are logged if memory usage exceeds 85% or available memory drops below 100MB
    - Detailed tracking shows memory consumption for each scraped item
+
+8. **Anti-Bot Detection and Cloudflare Issues**
+   ```bash
+   # Monitor Cloudflare and CAPTCHA detection
+   grep "Cloudflare detected\|CAPTCHA.*detected" movie_scraper.log
+   
+   # Check timeout causes and analysis
+   grep "TIMEOUT CAUSE" movie_scraper.log
+   
+   # Monitor page status during navigation
+   grep "Page Status:\|Title:\|Detected elements:" movie_scraper.log
+   
+   # Check for access denied/blocked pages
+   grep "Access denied\|error page detected" movie_scraper.log
+   
+   # Example anti-bot detection logs:
+   # Homepage Navigation - Page Status: URL=https://hkmovie6.com/...
+   # Homepage Navigation - Title: HK Movie 6
+   # Movie Navigation: Wicked - Cloudflare detected!
+   # TIMEOUT Analysis - Movie: Wicked - CAPTCHA/verification detected!
+   # TIMEOUT CAUSE: CAPTCHA/verification detected for movie Wicked
+   ```
+   - **Cloudflare Detection**: Automatic detection of Cloudflare protection pages
+   - **CAPTCHA Recognition**: Identifies verification challenges and "Just a moment" pages
+   - **Timeout Analysis**: Diagnoses the cause of timeouts (CAPTCHA, Cloudflare, page loading issues)
+   - **Enhanced Browser Args**: Uses anti-detection flags to reduce bot detection
+   - **Page Status Monitoring**: Checks page state during navigation and timeouts
+   
+   **If Cloudflare/CAPTCHA is detected:**
+   - Consider changing IP address or using a VPN
+   - Try reducing scraping frequency (increase `SCRAPER_DELAY`)
+   - The website is actively blocking automated access
+   - May need to implement additional anti-detection measures or use residential proxies
 
 ### Debug Mode
 

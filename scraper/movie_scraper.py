@@ -138,10 +138,25 @@ class MovieScraper:
             # Log RAM status before browser setup
             self._log_ram_status("Before Browser Setup")
             
-            # Chrome options for zendriver - using only supported flags
+            # Chrome options for zendriver - enhanced anti-detection
             browser_args = [
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
+                "--disable-web-security",
+                "--disable-features=VizDisplayCompositor",
+                "--disable-extensions",
+                "--disable-plugins",
+                "--disable-images",  # Reduce bandwidth and loading time
+                "--disable-javascript-harmony-shipping",
+                "--disable-background-timer-throttling",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-field-trial-config",
+                "--disable-back-forward-cache",
+                "--disable-ipc-flooding-protection",
+                "--no-first-run",
+                "--no-default-browser-check",
+                "--no-pings",
                 # "--disable-blink-features=AutomationControlled",
                 # "--no-sandbox"
             ]
@@ -258,6 +273,17 @@ class MovieScraper:
             
             # Wait for page to load
             await asyncio.sleep(2)
+            
+            # Check page status after initial navigation
+            page_status = await self._check_page_status("Homepage Navigation")
+            
+            # If we detect captcha or access issues, log and potentially abort
+            if page_status.get('has_captcha'):
+                logger.error("CAPTCHA detected on homepage - scraping may be blocked")
+                return False
+            elif page_status.get('has_error_page'):
+                logger.error("Access denied on homepage - scraping is blocked")
+                return False
             
             # Check and handle language switching with retry logic
             language_switched = await self._handle_language_switching()
@@ -712,7 +738,25 @@ class MovieScraper:
             return result
             
         except asyncio.TimeoutError:
-            logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}")
+            
+            # Check page status during timeout to diagnose the issue
+            try:
+                page_status = await self._check_page_status(f"TIMEOUT Analysis - Movie: {movie_name}")
+                if page_status.get('has_captcha'):
+                    logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for movie {movie_name}")
+                elif page_status.get('has_cloudflare'):
+                    logger.error(f"TIMEOUT CAUSE: Cloudflare protection detected for movie {movie_name}")
+                elif page_status.get('has_error_page'):
+                    logger.error(f"TIMEOUT CAUSE: Access denied/error page for movie {movie_name}")
+                elif not page_status.get('page_ready'):
+                    logger.error(f"TIMEOUT CAUSE: Page not loaded properly for movie {movie_name}")
+                else:
+                    logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for movie {movie_name}")
+            except Exception as status_check_error:
+                logger.error(f"Could not check page status during timeout for movie {movie_name}: {status_check_error}")
+            
+            logger.warning(f"Restarting browser due to timeout for movie {movie_name}...")
             try:
                 await self._restart_browser()
                 # Small delay after restart to let browser stabilize
@@ -793,6 +837,104 @@ class MovieScraper:
                     'description': 'Error retrieving description'
                 }
     
+    async def _check_page_status(self, context: str = "") -> Dict[str, any]:
+        """
+        Check current page status for anti-bot measures and other issues
+        
+        Args:
+            context: Context description for logging
+            
+        Returns:
+            Dictionary with page status information
+        """
+        try:
+            status_info = {
+                'url': await self.page.evaluate("window.location.href"),
+                'title': await self.page.evaluate("document.title"),
+                'has_cloudflare': False,
+                'has_captcha': False,
+                'has_error_page': False,
+                'page_ready': False,
+                'suspicious_elements': []
+            }
+            
+            # Check for Cloudflare presence
+            cloudflare_indicators = await self.page.evaluate("""
+                (() => {
+                    const indicators = [];
+                    
+                    // Check for Cloudflare elements
+                    if (document.querySelector('div[class*="cf-"]') || 
+                        document.querySelector('div[id*="cf-"]') ||
+                        document.querySelector('script[src*="cloudflare"]') ||
+                        document.body.innerHTML.includes('cloudflare') ||
+                        document.body.innerHTML.includes('Cloudflare')) {
+                        indicators.push('cloudflare_detected');
+                    }
+                    
+                    // Check for CAPTCHA elements
+                    if (document.querySelector('iframe[src*="captcha"]') ||
+                        document.querySelector('div[class*="captcha"]') ||
+                        document.querySelector('div[id*="captcha"]') ||
+                        document.body.innerHTML.includes('captcha') ||
+                        document.body.innerHTML.includes('CAPTCHA')) {
+                        indicators.push('captcha_detected');
+                    }
+                    
+                    // Check for "Just a moment" or similar messages
+                    if (document.body.innerText.includes('Just a moment') ||
+                        document.body.innerText.includes('Checking your browser') ||
+                        document.body.innerText.includes('Please wait') ||
+                        document.body.innerText.includes('Verifying you are human')) {
+                        indicators.push('verification_message');
+                    }
+                    
+                    // Check for error pages
+                    if (document.body.innerText.includes('403') ||
+                        document.body.innerText.includes('Access denied') ||
+                        document.body.innerText.includes('Forbidden') ||
+                        document.body.innerText.includes('Rate limited')) {
+                        indicators.push('access_denied');
+                    }
+                    
+                    // Check if page seems to be loading normally
+                    const mainContent = document.querySelector('div.flex, div.container, main, #main, .main');
+                    if (mainContent && mainContent.children.length > 0) {
+                        indicators.push('main_content_present');
+                    }
+                    
+                    return indicators;
+                })()
+            """)
+            
+            # Analyze indicators
+            status_info['has_cloudflare'] = 'cloudflare_detected' in cloudflare_indicators
+            status_info['has_captcha'] = 'captcha_detected' in cloudflare_indicators or 'verification_message' in cloudflare_indicators
+            status_info['has_error_page'] = 'access_denied' in cloudflare_indicators
+            status_info['page_ready'] = 'main_content_present' in cloudflare_indicators
+            status_info['suspicious_elements'] = cloudflare_indicators
+            
+            # Log status if context provided
+            if context:
+                logger.info(f"{context} - Page Status: URL={status_info['url'][:100]}...")
+                logger.info(f"{context} - Title: {status_info['title']}")
+                if status_info['has_cloudflare']:
+                    logger.warning(f"{context} - Cloudflare detected!")
+                if status_info['has_captcha']:
+                    logger.warning(f"{context} - CAPTCHA/verification detected!")
+                if status_info['has_error_page']:
+                    logger.warning(f"{context} - Access denied/error page detected!")
+                if not status_info['page_ready']:
+                    logger.warning(f"{context} - Main content not found - page may not be loaded properly")
+                if status_info['suspicious_elements']:
+                    logger.info(f"{context} - Detected elements: {status_info['suspicious_elements']}")
+            
+            return status_info
+            
+        except Exception as e:
+            logger.warning(f"Error checking page status for {context}: {e}")
+            return {'error': str(e)}
+    
     async def _scrape_movie_details_internal(self, movie_name: str, movie_url: str) -> Dict[str, str]:
         """
         Internal method for scraping movie details (called by scrape_movie_details with timeout)
@@ -805,8 +947,12 @@ class MovieScraper:
             Dictionary with movie details
         """
         # Navigate to movie page
+        logger.info(f"Navigating to movie URL: {movie_url}")
         await self.page.get(movie_url)
         await asyncio.sleep(2)
+        
+        # Check page status after navigation
+        await self._check_page_status(f"Movie Navigation: {movie_name}")
         
         # Scrape genre/category
         category = await self.page.evaluate("""
@@ -875,7 +1021,25 @@ class MovieScraper:
             return result
             
         except asyncio.TimeoutError:
-            logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}")
+            
+            # Check page status during timeout to diagnose the issue
+            try:
+                page_status = await self._check_page_status(f"TIMEOUT Analysis - Cinema: {cinema_name}")
+                if page_status.get('has_captcha'):
+                    logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for cinema {cinema_name}")
+                elif page_status.get('has_cloudflare'):
+                    logger.error(f"TIMEOUT CAUSE: Cloudflare protection detected for cinema {cinema_name}")
+                elif page_status.get('has_error_page'):
+                    logger.error(f"TIMEOUT CAUSE: Access denied/error page for cinema {cinema_name}")
+                elif not page_status.get('page_ready'):
+                    logger.error(f"TIMEOUT CAUSE: Page not loaded properly for cinema {cinema_name}")
+                else:
+                    logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for cinema {cinema_name}")
+            except Exception as status_check_error:
+                logger.error(f"Could not check page status during timeout for cinema {cinema_name}: {status_check_error}")
+            
+            logger.warning(f"Restarting browser due to timeout for cinema {cinema_name}...")
             try:
                 await self._restart_browser()
                 # Small delay after restart to let browser stabilize
@@ -965,8 +1129,12 @@ class MovieScraper:
             Dictionary with cinema details
         """
         # Navigate to cinema page
+        logger.info(f"Navigating to cinema URL: {cinema_url}")
         await self.page.get(cinema_url)
         await asyncio.sleep(2)
+        
+        # Check page status after navigation
+        await self._check_page_status(f"Cinema Navigation: {cinema_name}")
         
         # Scrape address (excluding the favorite button)
         address = await self.page.evaluate("""
