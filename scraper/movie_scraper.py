@@ -6,6 +6,7 @@ import logging
 import time
 import asyncio
 import csv
+import subprocess
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, date
 import zendriver as zd
@@ -35,6 +36,93 @@ class MovieScraper:
         # Read timeout from environment (default: 60 seconds)
         self.scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '60'))
     
+    def _get_ram_info(self) -> Dict[str, int]:
+        """
+        Get RAM information using vmstat (Amazon Linux compatible)
+        
+        Returns:
+            Dictionary with RAM info in MB
+        """
+        try:
+            # Run vmstat -s to get memory statistics
+            result = subprocess.run(['vmstat', '-s'], capture_output=True, text=True, timeout=5)
+            
+            if result.returncode == 0:
+                lines = result.stdout.strip().split('\n')
+                ram_info = {}
+                
+                for line in lines:
+                    line = line.strip()
+                    if 'total memory' in line:
+                        # Extract total memory in KB, convert to MB
+                        total_kb = int(line.split()[0])
+                        ram_info['total_mb'] = total_kb // 1024
+                    elif 'free memory' in line:
+                        # Extract free memory in KB, convert to MB
+                        free_kb = int(line.split()[0])
+                        ram_info['free_mb'] = free_kb // 1024
+                    elif 'buffer memory' in line:
+                        # Extract buffer memory in KB, convert to MB
+                        buffer_kb = int(line.split()[0])
+                        ram_info['buffer_mb'] = buffer_kb // 1024
+                    elif 'swap cache' in line:
+                        # Extract swap cache in KB, convert to MB
+                        cache_kb = int(line.split()[0])
+                        ram_info['cache_mb'] = cache_kb // 1024
+                
+                # Calculate available memory (free + buffer + cache)
+                if 'free_mb' in ram_info and 'buffer_mb' in ram_info and 'cache_mb' in ram_info:
+                    ram_info['available_mb'] = ram_info['free_mb'] + ram_info['buffer_mb'] + ram_info['cache_mb']
+                
+                # Calculate used memory
+                if 'total_mb' in ram_info and 'available_mb' in ram_info:
+                    ram_info['used_mb'] = ram_info['total_mb'] - ram_info['available_mb']
+                    ram_info['usage_percent'] = round((ram_info['used_mb'] / ram_info['total_mb']) * 100, 1)
+                
+                return ram_info
+                
+            else:
+                logger.warning(f"vmstat command failed: {result.stderr}")
+                return {}
+                
+        except subprocess.TimeoutExpired:
+            logger.warning("vmstat command timed out")
+            return {}
+        except Exception as e:
+            logger.warning(f"Failed to get RAM info: {e}")
+            return {}
+    
+    def _log_ram_status(self, context: str = ""):
+        """
+        Log current RAM status with context
+        
+        Args:
+            context: Context description for the log message
+        """
+        try:
+            ram_info = self._get_ram_info()
+            
+            if ram_info:
+                context_str = f"[{context}] " if context else ""
+                logger.info(
+                    f"{context_str}RAM Status: "
+                    f"Available: {ram_info.get('available_mb', 'N/A')}MB, "
+                    f"Used: {ram_info.get('used_mb', 'N/A')}MB "
+                    f"({ram_info.get('usage_percent', 'N/A')}%), "
+                    f"Total: {ram_info.get('total_mb', 'N/A')}MB"
+                )
+                
+                # Warn if memory usage is high
+                if 'usage_percent' in ram_info and ram_info['usage_percent'] > 85:
+                    logger.warning(f"High memory usage detected: {ram_info['usage_percent']}%")
+                elif 'available_mb' in ram_info and ram_info['available_mb'] < 100:
+                    logger.warning(f"Low available memory: {ram_info['available_mb']}MB")
+            else:
+                logger.warning(f"{context_str}Unable to retrieve RAM information")
+                
+        except Exception as e:
+            logger.warning(f"Error logging RAM status: {e}")
+    
     async def __aenter__(self):
         """Async context manager entry"""
         await self._setup_browser()
@@ -47,6 +135,9 @@ class MovieScraper:
     async def _setup_browser(self):
         """Set up the Zendriver browser with options"""
         try:
+            # Log RAM status before browser setup
+            self._log_ram_status("Before Browser Setup")
+            
             # Chrome options for zendriver - using only supported flags
             browser_args = [
                 "--disable-dev-shm-usage",
@@ -67,6 +158,9 @@ class MovieScraper:
             )
             
             logger.info("Zendriver browser initialized successfully")
+            
+            # Log RAM status after browser setup
+            self._log_ram_status("After Browser Setup")
             
         except Exception as e:
             logger.error(f"Failed to initialize browser: {e}")
@@ -113,6 +207,9 @@ class MovieScraper:
         try:
             logger.warning("Restarting browser due to timeout or failure...")
             
+            # Log RAM before restart
+            self._log_ram_status("Before Browser Restart")
+            
             # Close existing browser
             await self.close()
             
@@ -126,6 +223,9 @@ class MovieScraper:
                 raise Exception("Browser restart failed - could not navigate to homepage")
             
             logger.info("Browser restarted successfully")
+            
+            # Log RAM after restart
+            self._log_ram_status("After Browser Restart")
             
         except Exception as e:
             logger.error(f"Error restarting browser: {e}")
@@ -1090,6 +1190,9 @@ class MovieScraper:
         try:
             logger.info(f"Scraping details for all movies from {movies_csv_file}")
             
+            # Log initial RAM status
+            self._log_ram_status("Starting Movie Details Scraping")
+            
             # Read movies from CSV
             movies = []
             with open(movies_csv_file, 'r', encoding='utf-8') as csvfile:
@@ -1153,6 +1256,10 @@ class MovieScraper:
                 # logger.info(f"Saved details for movie: {movie_name}")
                 movies_processed += 1
                 
+                # Log RAM status every 10 movies
+                if movies_processed % 10 == 0:
+                    self._log_ram_status(f"Movie Progress: {movies_processed}/{len(movies)}")
+                
                 # Small delay between requests to be respectful
                 await asyncio.sleep(1)
             
@@ -1162,8 +1269,13 @@ class MovieScraper:
             logger.info(f"  - Movies added to DB: {movies_added}")
             logger.info(f"Successfully saved detailed movie information to {output_file}")
             
+            # Log final RAM status
+            self._log_ram_status("Completed Movie Details Scraping")
+            
         except Exception as e:
             logger.error(f"Error scraping movie details: {e}")
+            # Log RAM status on error
+            self._log_ram_status("Error During Movie Details Scraping")
 
     async def scrape_all_cinema_details(self, cinemas_csv_file: str = "cinemas.csv", output_file: str = "cinemas_details.csv"):
         """
@@ -1176,6 +1288,9 @@ class MovieScraper:
         """
         try:
             logger.info(f"Scraping details for all cinemas from {cinemas_csv_file}")
+            
+            # Log initial RAM status
+            self._log_ram_status("Starting Cinema Details Scraping")
             
             # Read cinemas from CSV
             cinemas = []
@@ -1237,6 +1352,10 @@ class MovieScraper:
                 
                 cinemas_processed += 1
                 
+                # Log RAM status every 5 cinemas (since cinema processing includes showtimes and is more intensive)
+                if cinemas_processed % 5 == 0:
+                    self._log_ram_status(f"Cinema Progress: {cinemas_processed}/{len(cinemas)}")
+                
                 # Small delay between requests to be respectful
                 await asyncio.sleep(1)
             
@@ -1246,8 +1365,13 @@ class MovieScraper:
             logger.info(f"  - Cinemas added to DB: {cinemas_added}")
             logger.info(f"Successfully saved detailed cinema information to {output_file}")
             
+            # Log final RAM status
+            self._log_ram_status("Completed Cinema Details Scraping")
+            
         except Exception as e:
             logger.error(f"Error scraping cinema details: {e}")
+            # Log RAM status on error
+            self._log_ram_status("Error During Cinema Details Scraping")
 
 
 # Synchronous wrapper for easier integration
