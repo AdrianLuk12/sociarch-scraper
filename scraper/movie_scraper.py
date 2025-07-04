@@ -740,9 +740,13 @@ class MovieScraper:
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}")
             
-            # Check page status during timeout to diagnose the issue
+            # Check page status during timeout to diagnose the issue (with timeout protection)
             try:
-                page_status = await self._check_page_status(f"TIMEOUT Analysis - Movie: {movie_name}")
+                logger.info(f"Analyzing timeout cause for movie {movie_name}...")
+                page_status = await asyncio.wait_for(
+                    self._check_page_status(f"TIMEOUT Analysis - Movie: {movie_name}"),
+                    timeout=5.0  # 5 second timeout for diagnosis
+                )
                 if page_status.get('has_captcha'):
                     logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for movie {movie_name}")
                 elif page_status.get('has_cloudflare'):
@@ -753,12 +757,18 @@ class MovieScraper:
                     logger.error(f"TIMEOUT CAUSE: Page not loaded properly for movie {movie_name}")
                 else:
                     logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for movie {movie_name}")
+            except asyncio.TimeoutError:
+                logger.error(f"Page status check also timed out for movie {movie_name} - browser is likely hung")
             except Exception as status_check_error:
                 logger.error(f"Could not check page status during timeout for movie {movie_name}: {status_check_error}")
             
             logger.warning(f"Restarting browser due to timeout for movie {movie_name}...")
             try:
-                await self._restart_browser()
+                # Restart browser with timeout protection
+                await asyncio.wait_for(
+                    self._restart_browser(),
+                    timeout=30.0  # 30 second timeout for browser restart
+                )
                 # Small delay after restart to let browser stabilize
                 await asyncio.sleep(2)
                 # Retry once after browser restart
@@ -767,6 +777,14 @@ class MovieScraper:
                     self._scrape_movie_details_internal(movie_name, movie_url),
                     timeout=self.scraper_timeout
                 )
+            except asyncio.TimeoutError:
+                logger.error(f"Browser restart timed out for movie {movie_name} - forcing failure")
+                return {
+                    'name': movie_name,
+                    'url': movie_url,
+                    'category': 'Restart Timeout Error',
+                    'description': 'Browser restart timed out'
+                }
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
                 
@@ -774,13 +792,18 @@ class MovieScraper:
                 if self._is_connection_error(restart_error):
                     logger.warning(f"Browser restart failed with connection error for movie {movie_name} (timeout case), attempting one more restart...")
                     try:
-                        # Attempt another browser restart
-                        await self._restart_browser()
+                        # Attempt another browser restart with timeout
+                        await asyncio.wait_for(
+                            self._restart_browser(),
+                            timeout=30.0
+                        )
                         logger.info(f"Second restart successful, retrying movie details scraping for: {movie_name}")
                         return await asyncio.wait_for(
                             self._scrape_movie_details_internal(movie_name, movie_url),
                             timeout=self.scraper_timeout
                         )
+                    except asyncio.TimeoutError:
+                        logger.error(f"Second browser restart also timed out for movie {movie_name}")
                     except Exception as second_restart_error:
                         logger.error(f"Second browser restart also failed for movie {movie_name} (timeout case): {second_restart_error}")
                 
@@ -796,7 +819,11 @@ class MovieScraper:
                 logger.error(f"Connection error scraping movie details for {movie_name}: {e}")
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
-                    await self._restart_browser()
+                    # Restart browser with timeout protection
+                    await asyncio.wait_for(
+                        self._restart_browser(),
+                        timeout=30.0
+                    )
                     # Small delay after restart to let browser stabilize
                     await asyncio.sleep(2)
                     # Retry once after browser restart
@@ -805,6 +832,14 @@ class MovieScraper:
                         self._scrape_movie_details_internal(movie_name, movie_url),
                         timeout=self.scraper_timeout
                     )
+                except asyncio.TimeoutError:
+                    logger.error(f"Browser restart timed out for movie {movie_name} after connection error")
+                    return {
+                        'name': movie_name,
+                        'url': movie_url,
+                        'category': 'Connection Error - Restart Timeout',
+                        'description': 'Browser restart timed out after connection error'
+                    }
                 except Exception as restart_error:
                     logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
                     
@@ -812,13 +847,18 @@ class MovieScraper:
                     if self._is_connection_error(restart_error):
                         logger.warning(f"Browser restart failed with connection error for movie {movie_name}, attempting one more restart...")
                         try:
-                            # Attempt another browser restart
-                            await self._restart_browser()
+                            # Attempt another browser restart with timeout
+                            await asyncio.wait_for(
+                                self._restart_browser(),
+                                timeout=30.0
+                            )
                             logger.info(f"Second restart successful, retrying movie details scraping for: {movie_name}")
                             return await asyncio.wait_for(
                                 self._scrape_movie_details_internal(movie_name, movie_url),
                                 timeout=self.scraper_timeout
                             )
+                        except asyncio.TimeoutError:
+                            logger.error(f"Second browser restart also timed out for movie {movie_name}")
                         except Exception as second_restart_error:
                             logger.error(f"Second browser restart also failed for movie {movie_name}: {second_restart_error}")
                     
@@ -848,9 +888,10 @@ class MovieScraper:
             Dictionary with page status information
         """
         try:
+            # Use timeouts for basic page evaluation to prevent hanging
             status_info = {
-                'url': await self.page.evaluate("window.location.href"),
-                'title': await self.page.evaluate("document.title"),
+                'url': await asyncio.wait_for(self.page.evaluate("window.location.href"), timeout=3.0),
+                'title': await asyncio.wait_for(self.page.evaluate("document.title"), timeout=3.0),
                 'has_cloudflare': False,
                 'has_captcha': False,
                 'has_error_page': False,
@@ -858,54 +899,57 @@ class MovieScraper:
                 'suspicious_elements': []
             }
             
-            # Check for Cloudflare presence
-            cloudflare_indicators = await self.page.evaluate("""
-                (() => {
-                    const indicators = [];
-                    
-                    // Check for Cloudflare elements
-                    if (document.querySelector('div[class*="cf-"]') || 
-                        document.querySelector('div[id*="cf-"]') ||
-                        document.querySelector('script[src*="cloudflare"]') ||
-                        document.body.innerHTML.includes('cloudflare') ||
-                        document.body.innerHTML.includes('Cloudflare')) {
-                        indicators.push('cloudflare_detected');
-                    }
-                    
-                    // Check for CAPTCHA elements
-                    if (document.querySelector('iframe[src*="captcha"]') ||
-                        document.querySelector('div[class*="captcha"]') ||
-                        document.querySelector('div[id*="captcha"]') ||
-                        document.body.innerHTML.includes('captcha') ||
-                        document.body.innerHTML.includes('CAPTCHA')) {
-                        indicators.push('captcha_detected');
-                    }
-                    
-                    // Check for "Just a moment" or similar messages
-                    if (document.body.innerText.includes('Just a moment') ||
-                        document.body.innerText.includes('Checking your browser') ||
-                        document.body.innerText.includes('Please wait') ||
-                        document.body.innerText.includes('Verifying you are human')) {
-                        indicators.push('verification_message');
-                    }
-                    
-                    // Check for error pages
-                    if (document.body.innerText.includes('403') ||
-                        document.body.innerText.includes('Access denied') ||
-                        document.body.innerText.includes('Forbidden') ||
-                        document.body.innerText.includes('Rate limited')) {
-                        indicators.push('access_denied');
-                    }
-                    
-                    // Check if page seems to be loading normally
-                    const mainContent = document.querySelector('div.flex, div.container, main, #main, .main');
-                    if (mainContent && mainContent.children.length > 0) {
-                        indicators.push('main_content_present');
-                    }
-                    
-                    return indicators;
-                })()
-            """)
+            # Check for Cloudflare presence (with timeout protection)
+            cloudflare_indicators = await asyncio.wait_for(
+                self.page.evaluate("""
+                    (() => {
+                        const indicators = [];
+                        
+                        // Check for Cloudflare elements
+                        if (document.querySelector('div[class*="cf-"]') || 
+                            document.querySelector('div[id*="cf-"]') ||
+                            document.querySelector('script[src*="cloudflare"]') ||
+                            document.body.innerHTML.includes('cloudflare') ||
+                            document.body.innerHTML.includes('Cloudflare')) {
+                            indicators.push('cloudflare_detected');
+                        }
+                        
+                        // Check for CAPTCHA elements
+                        if (document.querySelector('iframe[src*="captcha"]') ||
+                            document.querySelector('div[class*="captcha"]') ||
+                            document.querySelector('div[id*="captcha"]') ||
+                            document.body.innerHTML.includes('captcha') ||
+                            document.body.innerHTML.includes('CAPTCHA')) {
+                            indicators.push('captcha_detected');
+                        }
+                        
+                        // Check for "Just a moment" or similar messages
+                        if (document.body.innerText.includes('Just a moment') ||
+                            document.body.innerText.includes('Checking your browser') ||
+                            document.body.innerText.includes('Please wait') ||
+                            document.body.innerText.includes('Verifying you are human')) {
+                            indicators.push('verification_message');
+                        }
+                        
+                        // Check for error pages
+                        if (document.body.innerText.includes('403') ||
+                            document.body.innerText.includes('Access denied') ||
+                            document.body.innerText.includes('Forbidden') ||
+                            document.body.innerText.includes('Rate limited')) {
+                            indicators.push('access_denied');
+                        }
+                        
+                        // Check if page seems to be loading normally
+                        const mainContent = document.querySelector('div.flex, div.container, main, #main, .main');
+                        if (mainContent && mainContent.children.length > 0) {
+                            indicators.push('main_content_present');
+                        }
+                        
+                        return indicators;
+                    })()
+                """),
+                timeout=5.0  # 5 second timeout for indicators check
+            )
             
             # Analyze indicators
             status_info['has_cloudflare'] = 'cloudflare_detected' in cloudflare_indicators
@@ -1023,9 +1067,13 @@ class MovieScraper:
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}")
             
-            # Check page status during timeout to diagnose the issue
+            # Check page status during timeout to diagnose the issue (with timeout protection)
             try:
-                page_status = await self._check_page_status(f"TIMEOUT Analysis - Cinema: {cinema_name}")
+                logger.info(f"Analyzing timeout cause for cinema {cinema_name}...")
+                page_status = await asyncio.wait_for(
+                    self._check_page_status(f"TIMEOUT Analysis - Cinema: {cinema_name}"),
+                    timeout=5.0  # 5 second timeout for diagnosis
+                )
                 if page_status.get('has_captcha'):
                     logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for cinema {cinema_name}")
                 elif page_status.get('has_cloudflare'):
@@ -1036,12 +1084,18 @@ class MovieScraper:
                     logger.error(f"TIMEOUT CAUSE: Page not loaded properly for cinema {cinema_name}")
                 else:
                     logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for cinema {cinema_name}")
+            except asyncio.TimeoutError:
+                logger.error(f"Page status check also timed out for cinema {cinema_name} - browser is likely hung")
             except Exception as status_check_error:
                 logger.error(f"Could not check page status during timeout for cinema {cinema_name}: {status_check_error}")
             
             logger.warning(f"Restarting browser due to timeout for cinema {cinema_name}...")
             try:
-                await self._restart_browser()
+                # Restart browser with timeout protection
+                await asyncio.wait_for(
+                    self._restart_browser(),
+                    timeout=30.0  # 30 second timeout for browser restart
+                )
                 # Small delay after restart to let browser stabilize
                 await asyncio.sleep(2)
                 # Retry once after browser restart
@@ -1050,6 +1104,13 @@ class MovieScraper:
                     self._scrape_cinema_details_internal(cinema_name, cinema_url),
                     timeout=self.scraper_timeout
                 )
+            except asyncio.TimeoutError:
+                logger.error(f"Browser restart timed out for cinema {cinema_name} - forcing failure")
+                return {
+                    'name': cinema_name,
+                    'url': cinema_url,
+                    'address': 'Browser restart timed out'
+                }
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
                 
@@ -1057,13 +1118,18 @@ class MovieScraper:
                 if self._is_connection_error(restart_error):
                     logger.warning(f"Browser restart failed with connection error for cinema {cinema_name} (timeout case), attempting one more restart...")
                     try:
-                        # Attempt another browser restart
-                        await self._restart_browser()
+                        # Attempt another browser restart with timeout
+                        await asyncio.wait_for(
+                            self._restart_browser(),
+                            timeout=30.0
+                        )
                         logger.info(f"Second restart successful, retrying cinema details scraping for: {cinema_name}")
                         return await asyncio.wait_for(
                             self._scrape_cinema_details_internal(cinema_name, cinema_url),
                             timeout=self.scraper_timeout
                         )
+                    except asyncio.TimeoutError:
+                        logger.error(f"Second browser restart also timed out for cinema {cinema_name}")
                     except Exception as second_restart_error:
                         logger.error(f"Second browser restart also failed for cinema {cinema_name} (timeout case): {second_restart_error}")
                 
@@ -1078,7 +1144,11 @@ class MovieScraper:
                 logger.error(f"Connection error scraping cinema details for {cinema_name}: {e}")
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
-                    await self._restart_browser()
+                    # Restart browser with timeout protection
+                    await asyncio.wait_for(
+                        self._restart_browser(),
+                        timeout=30.0
+                    )
                     # Small delay after restart to let browser stabilize
                     await asyncio.sleep(2)
                     # Retry once after browser restart
@@ -1087,6 +1157,13 @@ class MovieScraper:
                         self._scrape_cinema_details_internal(cinema_name, cinema_url),
                         timeout=self.scraper_timeout
                     )
+                except asyncio.TimeoutError:
+                    logger.error(f"Browser restart timed out for cinema {cinema_name} after connection error")
+                    return {
+                        'name': cinema_name,
+                        'url': cinema_url,
+                        'address': 'Browser restart timed out after connection error'
+                    }
                 except Exception as restart_error:
                     logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
                     
@@ -1094,13 +1171,18 @@ class MovieScraper:
                     if self._is_connection_error(restart_error):
                         logger.warning(f"Browser restart failed with connection error for cinema {cinema_name}, attempting one more restart...")
                         try:
-                            # Attempt another browser restart
-                            await self._restart_browser()
+                            # Attempt another browser restart with timeout
+                            await asyncio.wait_for(
+                                self._restart_browser(),
+                                timeout=30.0
+                            )
                             logger.info(f"Second restart successful, retrying cinema details scraping for: {cinema_name}")
                             return await asyncio.wait_for(
                                 self._scrape_cinema_details_internal(cinema_name, cinema_url),
                                 timeout=self.scraper_timeout
                             )
+                        except asyncio.TimeoutError:
+                            logger.error(f"Second browser restart also timed out for cinema {cinema_name}")
                         except Exception as second_restart_error:
                             logger.error(f"Second browser restart also failed for cinema {cinema_name}: {second_restart_error}")
                     
