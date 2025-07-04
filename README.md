@@ -189,6 +189,7 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 - **Intelligent Error Detection**: Recognizes different types of failures (timeouts vs connection errors)
 - **Anti-Bot Detection**: Automatic detection of Cloudflare, CAPTCHA, and access restrictions during navigation
 - **Fast Timeout Recovery**: Immediate browser restart after timeouts without analysis to prevent hanging
+- **Error Data Filtering**: Automatically detects and prevents error data from being saved to database
 - **Graceful Degradation**: Continues processing remaining items after failures
 - **Memory Monitoring**: Real-time RAM usage tracking using vmstat (Amazon Linux compatible)
 - **Enhanced Stealth**: Advanced browser configuration to reduce bot detection
@@ -260,6 +261,12 @@ knowledge_base.showtimes (
     created_at TIMESTAMP WITH TIME ZONE
 )
 ```
+
+**Data Quality Protection**: 
+- Error data (timeouts, connection failures, browser crashes) is automatically filtered and not inserted into the database
+- Only successfully scraped, valid data is stored in Supabase
+- Error data is still logged to CSV files for debugging purposes
+- Showtimes are only scraped for cinemas with valid address data
 
 ## Monitoring & Logging
 
@@ -395,6 +402,12 @@ The scraper includes robust error handling for different failure scenarios:
    # Monitor browser restart timeouts specifically
    grep "Browser restart timed out\|restart also timed out" movie_scraper.log
    
+   # Monitor error data filtering
+   grep "scraped with errors\|skipping database insertion" movie_scraper.log
+   
+   # Check what error data was filtered out
+   grep "Error details -" movie_scraper.log
+   
    # Adjust timeout if pages load slowly
    export SCRAPER_TIMEOUT=120  # Increase to 2 minutes
    ```
@@ -471,6 +484,30 @@ The scraper includes robust error handling for different failure scenarios:
    - Try reducing scraping frequency (increase `SCRAPER_DELAY`)
    - The website is actively blocking automated access
    - May need to implement additional anti-detection measures or use residential proxies
+
+9. **Error Data Filtering**
+   ```bash
+   # Monitor when error data is filtered from database insertion
+   grep "scraped with errors\|skipping database insertion" movie_scraper.log
+   
+   # See specific error details that were filtered
+   grep "Error details -" movie_scraper.log
+   
+   # Check for showtime scraping being skipped due to errors
+   grep "skipping showtime scraping" movie_scraper.log
+   
+   # Example error filtering logs:
+   # Movie 'Behind the Shadows' scraped with errors, skipping database insertion
+   # Error details - Category: Timeout Error, Description: Timeout error - browser restart failed...
+   # Cinema 'AMC Pacific Place' scraped with errors, skipping database insertion
+   # Error details - Address: Browser restart timed out after connection error
+   # Cinema 'AMC Pacific Place' has error data, skipping showtime scraping
+   ```
+   - **Error Detection**: Automatically identifies timeout errors, connection errors, and restart failures
+   - **Database Protection**: Prevents corrupted/error data from being inserted into database
+   - **Showtime Filtering**: Skips showtime scraping for cinemas that had errors during detail scraping
+   - **CSV Logging**: Error data is still logged to CSV files for debugging purposes
+   - **Error Indicators**: Detects phrases like "timeout error", "connection error", "browser restart", etc.
 
 ### Debug Mode
 

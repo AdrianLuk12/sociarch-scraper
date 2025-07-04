@@ -708,6 +708,50 @@ class MovieScraper:
         text = ' '.join(text.split())  # Normalize whitespace
         
         return text.strip()
+    
+    def _is_error_data(self, data: Dict[str, str], data_type: str = "movie") -> bool:
+        """
+        Check if the scraped data contains error indicators that should not be saved to database
+        
+        Args:
+            data: Dictionary containing scraped data
+            data_type: Type of data ("movie" or "cinema")
+            
+        Returns:
+            True if data contains errors, False if data is valid
+        """
+        error_indicators = [
+            'timeout error',
+            'connection error', 
+            'restart timeout',
+            'browser restart',
+            'error retrieving',
+            'browser unresponsive',
+            'restart timed out',
+            'restart failed',
+            'browser restart timed out',
+            'connection error - restart timeout',
+            'restart timeout error'
+        ]
+        
+        if data_type == "movie":
+            # Check category and description fields for movies
+            category = (data.get('category', '')).lower()
+            description = (data.get('description', '')).lower()
+            
+            for indicator in error_indicators:
+                if indicator in category or indicator in description:
+                    return True
+                    
+        elif data_type == "cinema":
+            # Check address field for cinemas
+            address = (data.get('address', '')).lower()
+            
+            for indicator in error_indicators:
+                if indicator in address:
+                    return True
+        
+        return False
 
     async def scrape_movie_details(self, movie_name: str, movie_url: str) -> Dict[str, str]:
         """
@@ -1217,14 +1261,21 @@ class MovieScraper:
         cinema_id = cinema_data['id']
         logger.info(f"Found cinema in database with ID: {cinema_id}")
         
-        # Now scrape showtimes on the same page
-        await self._scrape_showtimes_for_cinema(cinema_id, cinema_name)
-        
-        return {
+        # Create return data first to check for errors
+        cinema_result = {
             'name': cinema_name,
             'url': cinema_url,
             'address': sanitized_address or 'Address not available'
         }
+        
+        # Only scrape showtimes if the cinema data is valid (no errors)
+        if not self._is_error_data(cinema_result, "cinema"):
+            logger.info(f"Cinema data is valid, proceeding to scrape showtimes for: {cinema_name}")
+            await self._scrape_showtimes_for_cinema(cinema_id, cinema_name)
+        else:
+            logger.warning(f"Cinema '{cinema_name}' has error data, skipping showtime scraping")
+        
+        return cinema_result
     
     async def _scrape_showtimes_for_cinema(self, cinema_id: str, cinema_name: str):
         """
@@ -1514,21 +1565,26 @@ class MovieScraper:
                 logger.info(f"Movie '{movie_name}' not found in database, scraping details...")
                 movie_details = await self.scrape_movie_details(movie_name, movie_url)
                 
-                # Prepare movie data for database
-                movie_data = {
-                    'name': movie_details['name'],
-                    'url': movie_details['url'],
-                    'category': movie_details['category'],
-                    'description': movie_details['description']
-                }
-                
-                # Add movie to database
-                movie_id = self.db_client.add_movie(movie_data)
-                if movie_id:
-                    # logger.info(f"Successfully added movie '{movie_name}' to database (ID: {movie_id})")
-                    movies_added += 1
+                # Check if scraped data contains errors
+                if self._is_error_data(movie_details, "movie"):
+                    logger.warning(f"Movie '{movie_name}' scraped with errors, skipping database insertion")
+                    logger.warning(f"Error details - Category: {movie_details.get('category')}, Description: {movie_details.get('description')[:100]}...")
                 else:
-                    logger.error(f"Failed to add movie '{movie_name}' to database")
+                    # Prepare movie data for database
+                    movie_data = {
+                        'name': movie_details['name'],
+                        'url': movie_details['url'],
+                        'category': movie_details['category'],
+                        'description': movie_details['description']
+                    }
+                    
+                    # Add movie to database
+                    movie_id = self.db_client.add_movie(movie_data)
+                    if movie_id:
+                        # logger.info(f"Successfully added movie '{movie_name}' to database (ID: {movie_id})")
+                        movies_added += 1
+                    else:
+                        logger.error(f"Failed to add movie '{movie_name}' to database")
                 
                 # Append to CSV immediately after scraping each movie
                 with open(output_file, 'a', newline='', encoding='utf-8') as csvfile:
@@ -1607,22 +1663,26 @@ class MovieScraper:
                     logger.info(f"Cinema '{cinema_name}' already exists in database, skipping database add...")
                     cinemas_skipped += 1
                 else:
-                    # Cinema doesn't exist, add to database
-                    logger.info(f"Cinema '{cinema_name}' not found in database, adding...")
-                    
-                    # Prepare cinema data for database
-                    cinema_data = {
-                        'name': cinema_details['name'],
-                        'url': cinema_details['url'],
-                        'address': cinema_details['address']
-                    }
-                    
-                    # Add cinema to database
-                    cinema_id = self.db_client.add_cinema(cinema_data)
-                    if cinema_id:
-                        cinemas_added += 1
+                    # Cinema doesn't exist, check for errors before adding to database
+                    if self._is_error_data(cinema_details, "cinema"):
+                        logger.warning(f"Cinema '{cinema_name}' scraped with errors, skipping database insertion")
+                        logger.warning(f"Error details - Address: {cinema_details.get('address')}")
                     else:
-                        logger.error(f"Failed to add cinema '{cinema_name}' to database")
+                        logger.info(f"Cinema '{cinema_name}' not found in database, adding...")
+                        
+                        # Prepare cinema data for database
+                        cinema_data = {
+                            'name': cinema_details['name'],
+                            'url': cinema_details['url'],
+                            'address': cinema_details['address']
+                        }
+                        
+                        # Add cinema to database
+                        cinema_id = self.db_client.add_cinema(cinema_data)
+                        if cinema_id:
+                            cinemas_added += 1
+                        else:
+                            logger.error(f"Failed to add cinema '{cinema_name}' to database")
                 
                 # Always append to CSV regardless of database status
                 with open(output_file, 'a', newline='', encoding='utf-8') as csvfile:
