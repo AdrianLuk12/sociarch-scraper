@@ -739,30 +739,9 @@ class MovieScraper:
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}")
+            logger.error(f"TIMEOUT CAUSE: Browser unresponsive - skipping analysis and forcing restart for movie {movie_name}")
             
-            # Check page status during timeout to diagnose the issue (with timeout protection)
-            try:
-                logger.info(f"Analyzing timeout cause for movie {movie_name}...")
-                page_status = await asyncio.wait_for(
-                    self._check_page_status(f"TIMEOUT Analysis - Movie: {movie_name}"),
-                    timeout=5.0  # 5 second timeout for diagnosis
-                )
-                if page_status.get('has_captcha'):
-                    logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for movie {movie_name}")
-                elif page_status.get('has_cloudflare'):
-                    logger.error(f"TIMEOUT CAUSE: Cloudflare protection detected for movie {movie_name}")
-                elif page_status.get('has_error_page'):
-                    logger.error(f"TIMEOUT CAUSE: Access denied/error page for movie {movie_name}")
-                elif not page_status.get('page_ready'):
-                    logger.error(f"TIMEOUT CAUSE: Page not loaded properly for movie {movie_name}")
-                else:
-                    logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for movie {movie_name}")
-            except asyncio.TimeoutError:
-                logger.error(f"Page status check also timed out for movie {movie_name} - browser is likely hung")
-            except Exception as status_check_error:
-                logger.error(f"Could not check page status during timeout for movie {movie_name}: {status_check_error}")
-            
-            logger.warning(f"Restarting browser due to timeout for movie {movie_name}...")
+            # Skip timeout analysis to prevent hanging - go straight to browser restart
             try:
                 # Restart browser with timeout protection
                 await asyncio.wait_for(
@@ -888,10 +867,10 @@ class MovieScraper:
             Dictionary with page status information
         """
         try:
-            # Use timeouts for basic page evaluation to prevent hanging
+            # Use very short timeouts for basic page evaluation to prevent hanging
             status_info = {
-                'url': await asyncio.wait_for(self.page.evaluate("window.location.href"), timeout=3.0),
-                'title': await asyncio.wait_for(self.page.evaluate("document.title"), timeout=3.0),
+                'url': await asyncio.wait_for(self.page.evaluate("window.location.href"), timeout=1.0),
+                'title': await asyncio.wait_for(self.page.evaluate("document.title"), timeout=1.0),
                 'has_cloudflare': False,
                 'has_captcha': False,
                 'has_error_page': False,
@@ -948,7 +927,7 @@ class MovieScraper:
                         return indicators;
                     })()
                 """),
-                timeout=5.0  # 5 second timeout for indicators check
+                timeout=2.0  # Reduced to 2 seconds for faster recovery
             )
             
             # Analyze indicators
@@ -1066,30 +1045,9 @@ class MovieScraper:
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}")
+            logger.error(f"TIMEOUT CAUSE: Browser unresponsive - skipping analysis and forcing restart for cinema {cinema_name}")
             
-            # Check page status during timeout to diagnose the issue (with timeout protection)
-            try:
-                logger.info(f"Analyzing timeout cause for cinema {cinema_name}...")
-                page_status = await asyncio.wait_for(
-                    self._check_page_status(f"TIMEOUT Analysis - Cinema: {cinema_name}"),
-                    timeout=5.0  # 5 second timeout for diagnosis
-                )
-                if page_status.get('has_captcha'):
-                    logger.error(f"TIMEOUT CAUSE: CAPTCHA/verification detected for cinema {cinema_name}")
-                elif page_status.get('has_cloudflare'):
-                    logger.error(f"TIMEOUT CAUSE: Cloudflare protection detected for cinema {cinema_name}")
-                elif page_status.get('has_error_page'):
-                    logger.error(f"TIMEOUT CAUSE: Access denied/error page for cinema {cinema_name}")
-                elif not page_status.get('page_ready'):
-                    logger.error(f"TIMEOUT CAUSE: Page not loaded properly for cinema {cinema_name}")
-                else:
-                    logger.error(f"TIMEOUT CAUSE: Unknown - page appears normal for cinema {cinema_name}")
-            except asyncio.TimeoutError:
-                logger.error(f"Page status check also timed out for cinema {cinema_name} - browser is likely hung")
-            except Exception as status_check_error:
-                logger.error(f"Could not check page status during timeout for cinema {cinema_name}: {status_check_error}")
-            
-            logger.warning(f"Restarting browser due to timeout for cinema {cinema_name}...")
+            # Skip timeout analysis to prevent hanging - go straight to browser restart
             try:
                 # Restart browser with timeout protection
                 await asyncio.wait_for(

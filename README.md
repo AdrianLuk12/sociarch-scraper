@@ -187,8 +187,8 @@ The scheduler runs daily at 6:00 AM Hong Kong time by default. You can modify th
 - **Language Detection**: Handles both English and Chinese interfaces
 - **Connection Recovery**: Automatic browser restart on connection failures and timeouts
 - **Intelligent Error Detection**: Recognizes different types of failures (timeouts vs connection errors)
-- **Anti-Bot Detection**: Automatic detection of Cloudflare, CAPTCHA, and access restrictions
-- **Timeout Diagnosis**: Analyzes page state during timeouts to identify blocking causes
+- **Anti-Bot Detection**: Automatic detection of Cloudflare, CAPTCHA, and access restrictions during navigation
+- **Fast Timeout Recovery**: Immediate browser restart after timeouts without analysis to prevent hanging
 - **Graceful Degradation**: Continues processing remaining items after failures
 - **Memory Monitoring**: Real-time RAM usage tracking using vmstat (Amazon Linux compatible)
 - **Enhanced Stealth**: Advanced browser configuration to reduce bot detection
@@ -389,12 +389,20 @@ The scraper includes robust error handling for different failure scenarios:
    # Monitor cascading restart failures
    grep "attempting one more restart\|Second restart" movie_scraper.log
    
+   # Check for immediate timeout recovery
+   grep "Browser unresponsive\|skipping analysis" movie_scraper.log
+   
+   # Monitor browser restart timeouts specifically
+   grep "Browser restart timed out\|restart also timed out" movie_scraper.log
+   
    # Adjust timeout if pages load slowly
    export SCRAPER_TIMEOUT=120  # Increase to 2 minutes
    ```
    - If you see frequent timeouts, increase `SCRAPER_TIMEOUT` value
    - Browser automatically restarts when individual detail pages timeout
    - **Connection failures** (like `Errno 111 Connect call failed`, `Failed to connect to browser`) trigger automatic browser restart
+   - **Protected restarts**: Browser restart operations have 30-second timeouts to prevent hanging
+   - **No timeout analysis**: Skips page status checks after timeouts to prevent hanging and ensure fast recovery
    - **Cascading restart failures**: If browser restart itself fails with connection error, attempts one additional restart
    - Up to two restart attempts per failed item before marking as failed
    - Batch processing continues with the next item after failures
@@ -430,30 +438,33 @@ The scraper includes robust error handling for different failure scenarios:
 
 8. **Anti-Bot Detection and Cloudflare Issues**
    ```bash
-   # Monitor Cloudflare and CAPTCHA detection
+   # Monitor Cloudflare and CAPTCHA detection during navigation
    grep "Cloudflare detected\|CAPTCHA.*detected" movie_scraper.log
    
-   # Check timeout causes and analysis
-   grep "TIMEOUT CAUSE" movie_scraper.log
+   # Check timeout events and immediate recovery
+   grep "TIMEOUT CAUSE\|Browser unresponsive" movie_scraper.log
    
-   # Monitor page status during navigation
+   # Monitor page status during navigation (not timeouts)
    grep "Page Status:\|Title:\|Detected elements:" movie_scraper.log
    
    # Check for access denied/blocked pages
    grep "Access denied\|error page detected" movie_scraper.log
    
-   # Example anti-bot detection logs:
+   # Example timeout recovery logs:
+   # Timeout (60.0s) scraping movie details for Behind the Shadows
+   # TIMEOUT CAUSE: Browser unresponsive - skipping analysis and forcing restart for movie Behind the Shadows
+   # Example navigation detection logs:
    # Homepage Navigation - Page Status: URL=https://hkmovie6.com/...
    # Homepage Navigation - Title: HK Movie 6
    # Movie Navigation: Wicked - Cloudflare detected!
-   # TIMEOUT Analysis - Movie: Wicked - CAPTCHA/verification detected!
-   # TIMEOUT CAUSE: CAPTCHA/verification detected for movie Wicked
    ```
    - **Cloudflare Detection**: Automatic detection of Cloudflare protection pages
    - **CAPTCHA Recognition**: Identifies verification challenges and "Just a moment" pages
-   - **Timeout Analysis**: Diagnoses the cause of timeouts (CAPTCHA, Cloudflare, page loading issues)
+   - **Immediate Timeout Recovery**: Skips analysis after timeouts to prevent hanging and forces immediate browser restart
    - **Enhanced Browser Args**: Uses anti-detection flags to reduce bot detection
-   - **Page Status Monitoring**: Checks page state during navigation and timeouts
+   - **Page Status Monitoring**: Checks page state during navigation (not during timeouts to prevent hanging)
+   - **Protected Operations**: Browser restart operations have timeouts to prevent hanging
+   - **Robust Error Recovery**: Fast recovery path that prioritizes continuation over analysis
    
    **If Cloudflare/CAPTCHA is detected:**
    - Consider changing IP address or using a VPN
