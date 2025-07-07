@@ -1,5 +1,5 @@
 """
-Main entry point for the movie scraper.
+Main entry point for the movie scraper - ECS Task Version.
 """
 import os
 import sys
@@ -21,8 +21,7 @@ logging.basicConfig(
     level=logging.INFO,
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
     handlers=[
-        logging.FileHandler('movie_scraper.log'),
-        logging.StreamHandler()
+        logging.StreamHandler()  # Only console logging for ECS
     ]
 )
 
@@ -34,13 +33,13 @@ logger = logging.getLogger(__name__)
 
 
 def run_scraper():
-    """Run the movie scraper."""
+    """Run the movie scraper once and exit."""
     try:
-        logger.info("Starting movie scraper")
+        logger.info("Starting movie scraper (ECS Task)")
         
         # Get configuration from environment
         scraper_delay = float(os.getenv('SCRAPER_DELAY', '2'))
-        headless_mode = os.getenv('HEADLESS_MODE', 'false').lower() == 'true'
+        headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'  # Default to headless in ECS
         
         # Initialize and test scraper using sync wrapper
         with MovieScraperSync(headless=headless_mode, delay=scraper_delay) as scraper:
@@ -102,16 +101,9 @@ def run_scraper():
                             print("Failed to find movies after all retry attempts")
                 
                 if movies:
-                    # Save to CSV
-                    scraper.save_movies_to_csv(movies, "movies.csv")
-                    print("Movies saved to movies.csv")
-                    
-                    # # Print first few movies for verification
-                    # print("\nFirst few movies:")
-                    # for i, (name, url) in enumerate(movies[:5]):
-                    #     print(f"{i+1}. {name} -> {url}")
-                    # if len(movies) > 5:
-                    #     print(f"   ... and {len(movies)-5} more movies")
+                    # Save to CSV (will be uploaded to S3 or EFS)
+                    scraper.save_movies_to_csv(movies, "/tmp/movies.csv")
+                    print("Movies saved to /tmp/movies.csv")
                 
                 # Scrape cinemas
                 cinemas = scraper.scrape_cinemas()
@@ -120,15 +112,8 @@ def run_scraper():
                     print(f"\nFound {len(cinemas)} cinemas")
                     
                     # Save to CSV
-                    scraper.save_cinemas_to_csv(cinemas, "cinemas.csv")
-                    print("Cinemas saved to cinemas.csv")
-                    
-                    # # Print first few cinemas for verification
-                    # print("\nFirst few cinemas:")
-                    # for i, (name, url) in enumerate(cinemas[:5]):
-                    #     print(f"{i+1}. {name} -> {url}")
-                    # if len(cinemas) > 5:
-                    #     print(f"   ... and {len(cinemas)-5} more cinemas")
+                    scraper.save_cinemas_to_csv(cinemas, "/tmp/cinemas.csv")
+                    print("Cinemas saved to /tmp/cinemas.csv")
                     
                 else:
                     logger.warning("No cinemas found")
@@ -136,15 +121,15 @@ def run_scraper():
                     
                 if movies:
                     print(f"\nScraping detailed information for {len(movies)} movies...")
-                    scraper.scrape_all_movie_details("movies.csv", "movies_details.csv")
-                    print("Movie details saved to movies_details.csv")
+                    scraper.scrape_all_movie_details("/tmp/movies.csv", "/tmp/movies_details.csv")
+                    print("Movie details saved to /tmp/movies_details.csv")
                 
                 if cinemas:
                     print(f"\nScraping detailed information for {len(cinemas)} cinemas...")
-                    scraper.scrape_all_cinema_details("cinemas.csv", "cinemas_details.csv")
-                    print("Cinema details saved to cinemas_details.csv")
+                    scraper.scrape_all_cinema_details("/tmp/cinemas.csv", "/tmp/cinemas_details.csv")
+                    print("Cinema details saved to /tmp/cinemas_details.csv")
                 
-                
+                logger.info("Movie scraper task completed successfully")
                 return True
             else:
                 logger.error("Failed to navigate to hkmovie6.com after retries")
@@ -158,25 +143,27 @@ def run_scraper():
 
 
 def main():
-    """Main function."""
+    """Main function for ECS task."""
     try:
+        logger.info("Starting ECS Movie Scraper Task")
         success = run_scraper()
         if success:
-            logger.info("Scraper completed successfully")
-            print("Scraper completed successfully")
+            logger.info("ECS task completed successfully")
+            print("ECS task completed successfully")
+            sys.exit(0)  # Success exit code
         else:
-            logger.error("Scraper failed")
-            print("Scraper failed")
-            sys.exit(1)
+            logger.error("ECS task failed")
+            print("ECS task failed")
+            sys.exit(1)  # Failure exit code
         
     except KeyboardInterrupt:
-        logger.info("Scraper interrupted by user")
-        print("\nScraper interrupted by user")
+        logger.info("ECS task interrupted")
+        print("\nECS task interrupted")
         sys.exit(1)
         
     except Exception as e:
-        logger.error(f"Scraper failed: {e}")
-        print(f"Scraper failed: {e}")
+        logger.error(f"ECS task failed: {e}")
+        print(f"ECS task failed: {e}")
         sys.exit(1)
 
 
