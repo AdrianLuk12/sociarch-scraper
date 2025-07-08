@@ -9,8 +9,12 @@ import csv
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, date
 import zendriver as zd
+from dotenv import load_dotenv
 
 from db.supabase_client import SupabaseClient
+
+# Load environment variables
+load_dotenv()
 
 logger = logging.getLogger(__name__)
 
@@ -46,6 +50,87 @@ class MovieScraper:
     async def __aexit__(self, exc_type, exc_val, exc_tb):
         """Async context manager exit"""
         await self.close()
+    
+    async def cleanup(self):
+        """Cleanup method for proper resource management"""
+        await self.close()
+    
+    async def scrape_all_data(self) -> bool:
+        """
+        Main method to scrape all data - movies, cinemas, and their details.
+        This is the primary interface method called by main.py.
+        
+        Returns:
+            bool: True if successful, False otherwise
+        """
+        try:
+            logger.info("Starting comprehensive data scraping...")
+            
+            # Setup browser if not already done
+            if not self.browser:
+                await self._setup_browser()
+            
+            # Navigate to homepage
+            if not await self.navigate_to_homepage():
+                logger.error("Failed to navigate to homepage")
+                return False
+            
+            # Scrape movies
+            logger.info("Scraping movie listings...")
+            movies = await self.scrape_movie_showings()
+            if not movies:
+                logger.warning("No movies found")
+                return False
+            
+            logger.info(f"Found {len(movies)} movies")
+            await self.save_movies_to_csv(movies, "movies.csv")
+            
+            # Scrape cinemas
+            logger.info("Scraping cinema listings...")
+            cinemas = await self.scrape_cinemas()
+            if not cinemas:
+                logger.warning("No cinemas found")
+                return False
+            
+            logger.info(f"Found {len(cinemas)} cinemas")
+            await self.save_cinemas_to_csv(cinemas, "cinemas.csv")
+            
+            # Scrape detailed information
+            logger.info("Scraping detailed movie information...")
+            await self.scrape_all_movie_details("movies.csv", "movies_details.csv")
+            
+            logger.info("Scraping detailed cinema information and showtimes...")
+            await self.scrape_all_cinema_details("cinemas.csv", "cinemas_details.csv")
+            
+            logger.info("All data scraping completed successfully")
+            return True
+            
+        except Exception as e:
+            logger.error(f"Error in scrape_all_data: {e}")
+            return False
+    
+    def _detect_cloudflare_challenge(self, page_content: str) -> bool:
+        """
+        Detect if the page contains Cloudflare challenge.
+        
+        Args:
+            page_content: The page content to check
+            
+        Returns:
+            bool: True if Cloudflare challenge is detected
+        """
+        cloudflare_indicators = [
+            'cloudflare',
+            'checking your browser',
+            'please wait',
+            'ddos protection',
+            'security check',
+            'ray id',
+            'cf-ray'
+        ]
+        
+        content_lower = page_content.lower()
+        return any(indicator in content_lower for indicator in cloudflare_indicators)
     
     async def _setup_browser(self):
         """Set up the Zendriver browser with options optimized for EC2"""

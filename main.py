@@ -1,313 +1,270 @@
 #!/usr/bin/env python3
 """
-Main entry point for the movie scraper - optimized for both local and EC2 deployment.
+Movie Scraper - Main Entry Point
+
+This module serves as the main entry point for the movie scraper application.
+It handles initialization, browser management, error recovery, and graceful shutdown.
 """
-import os
-import sys
+
+import asyncio
 import logging
-import time
+import os
 import signal
+import sys
+import time
 from typing import Optional
-from datetime import datetime
-from dotenv import load_dotenv, find_dotenv
 
-# Add current directory to path to import modules
-sys.path.append(os.path.dirname(os.path.abspath(__file__)))
+from scraper.movie_scraper import MovieScraper
 
-from scraper.movie_scraper import MovieScraperSync
-
-# Load environment variables
-load_dotenv(find_dotenv())
-
-# Configure logging with more detailed format for debugging
-logging.basicConfig(
-    level=logging.INFO,
-    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
-    handlers=[
-        logging.FileHandler('movie_scraper.log'),
-        logging.StreamHandler()
-    ]
-)
-
-# Suppress noisy logs from HTTP libraries and Supabase client
-logging.getLogger('httpx').setLevel(logging.WARNING)
-logging.getLogger('httpcore').setLevel(logging.WARNING)
-
-logger = logging.getLogger(__name__)
-
-# Global flag for graceful shutdown
+# Global flag for shutdown
 shutdown_requested = False
+current_scraper: Optional[MovieScraper] = None
+
+def setup_logging():
+    """Configure logging for the application."""
+    log_level = os.getenv('LOG_LEVEL', 'INFO').upper()
+    log_format = '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    
+    logging.basicConfig(
+        level=getattr(logging, log_level),
+        format=log_format,
+        handlers=[
+            logging.FileHandler('movie_scraper.log'),
+            logging.StreamHandler(sys.stdout)
+        ]
+    )
 
 def signal_handler(signum, frame):
-    """Handle shutdown signals gracefully"""
-    global shutdown_requested
-    logger.info(f"Received signal {signum}, shutting down gracefully...")
+    """Handle shutdown signals with immediate effect."""
+    global shutdown_requested, current_scraper
+    
+    if shutdown_requested:
+        # Force immediate exit if already shutting down
+        logging.warning("Force shutdown requested, terminating immediately...")
+        if current_scraper and current_scraper.browser:
+            try:
+                current_scraper.browser.quit()
+            except:
+                pass
+        os._exit(1)
+    
     shutdown_requested = True
+    signal_name = signal.Signals(signum).name
+    logging.info(f"Received signal {signal_name}, initiating graceful shutdown...")
+    
+    # Set a hard timeout for shutdown
+    def force_exit():
+        time.sleep(10)  # Wait 10 seconds for graceful shutdown
+        logging.error("Graceful shutdown timeout, forcing exit...")
+        os._exit(1)
+    
+    import threading
+    threading.Thread(target=force_exit, daemon=True).start()
 
-# Register signal handlers
-signal.signal(signal.SIGTERM, signal_handler)
-signal.signal(signal.SIGINT, signal_handler)
+def setup_signal_handlers():
+    """Set up signal handlers for graceful shutdown."""
+    signal.signal(signal.SIGINT, signal_handler)
+    signal.signal(signal.SIGTERM, signal_handler)
+    
+    # Handle additional signals on Unix systems
+    if hasattr(signal, 'SIGHUP'):
+        signal.signal(signal.SIGHUP, signal_handler)
 
-def is_browser_error(error: Exception) -> bool:
+def detect_browser_errors(error_msg: str) -> bool:
     """
-    Check if the error is a browser-related error that requires restart
+    Detect if an error indicates browser-related issues that require restart.
     
     Args:
-        error: The exception to check
+        error_msg: The error message to check
         
     Returns:
-        True if this is a browser error that requires restart
+        bool: True if the error indicates a browser issue
     """
-    error_str = str(error).lower()
-    
-    # Browser error patterns
-    browser_patterns = [
-        'stopiteration',
-        'timed out during opening handshake',
-        'failed to connect to browser',
-        'failed to initialize browser',
+    browser_error_patterns = [
+        'StopIteration',
+        'no close frame received or sent',
+        'Connection refused',
+        'Connect call failed',
+        'Connection reset by peer',
+        'handshake timeout',
+        'Navigation timeout',
+        'websocket',
+        'ERR_NETWORK_CHANGED',
+        'net::ERR_',
         'chrome not reachable',
-        'session not created',
-        'no such session',
-        'invalid session id',
-        'target closed',
-        'connection refused',
-        'connection reset',
-        'broken pipe',
-        'connect call failed',
-        'browser process ended',
-        'chrome has crashed',
-        'websocket connection closed',
+        'browser has disconnected',
+        'Target closed',
+        'Session not created',
+        'unknown error: DevToolsActivePort',
+        'failed to connect to DevTools',
+        'connection lost',
+        'browser crashed',
     ]
     
-    return any(pattern in error_str for pattern in browser_patterns)
+    error_msg_lower = error_msg.lower()
+    return any(pattern.lower() in error_msg_lower for pattern in browser_error_patterns)
 
-def is_cloudflare_or_blocking(error_msg: str) -> bool:
+def detect_cloudflare_challenge(page_content: str) -> bool:
     """
-    Check if the error indicates Cloudflare or other blocking mechanisms
+    Detect if the page contains Cloudflare challenge.
     
     Args:
-        error_msg: Error message to check
+        page_content: The page content to check
         
     Returns:
-        True if this appears to be a blocking issue
+        bool: True if Cloudflare challenge is detected
     """
-    blocking_patterns = [
+    cloudflare_indicators = [
         'cloudflare',
-        'challenge',
-        'captcha',
-        'access denied',
-        'blocked',
-        'rate limit',
-        'too many requests',
-        'suspicious activity'
+        'checking your browser',
+        'please wait',
+        'ddos protection',
+        'security check',
+        'ray id',
+        'cf-ray'
     ]
     
-    return any(pattern in error_msg.lower() for pattern in blocking_patterns)
+    content_lower = page_content.lower()
+    return any(indicator in content_lower for indicator in cloudflare_indicators)
 
-def run_scraper_with_retry(max_browser_restarts: int = 3) -> bool:
+async def run_scraper_with_recovery():
     """
-    Run the movie scraper with automatic browser restart on browser errors
-    
-    Args:
-        max_browser_restarts: Maximum number of browser restart attempts
-        
-    Returns:
-        True if successful, False otherwise
+    Run the scraper with automatic error recovery and browser restart.
     """
-    browser_restart_count = 0
+    global current_scraper, shutdown_requested
     
-    while browser_restart_count <= max_browser_restarts:
+    logger = logging.getLogger(__name__)
+    max_consecutive_failures = 3
+    consecutive_failures = 0
+    base_delay = 5
+    
+    while not shutdown_requested:
         try:
-            if shutdown_requested:
-                logger.info("Shutdown requested, stopping scraper")
-                return False
-                
-            logger.info(f"Starting movie scraper (browser restart attempt {browser_restart_count + 1}/{max_browser_restarts + 1})")
+            # Initialize scraper
+            logger.info("Initializing movie scraper...")
+            current_scraper = MovieScraper()
             
-            # Get configuration from environment
-            scraper_delay = float(os.getenv('SCRAPER_DELAY', '1'))  # Reduced default delay
-            headless_mode = os.getenv('HEADLESS_MODE', 'true').lower() == 'true'  # Default to headless
+            # Run scraper
+            logger.info("Starting movie scraping process...")
+            success = await current_scraper.scrape_all_data()
             
-            # Initialize and test scraper using sync wrapper
-            with MovieScraperSync(headless=headless_mode, delay=scraper_delay) as scraper:
-                logger.info("Scraper initialized successfully")
+            if success:
+                logger.info("Scraping completed successfully")
+                consecutive_failures = 0
                 
-                # Navigate to homepage with retry logic
-                max_nav_retries = 3
-                navigation_success = False
+                # Check if this is a one-time run
+                if os.getenv('RUN_ONCE', 'false').lower() == 'true':
+                    logger.info("One-time run completed, exiting...")
+                    break
                 
-                for nav_attempt in range(max_nav_retries):
+                # Wait before next run (default: 6 hours for continuous mode)
+                wait_time = int(os.getenv('SCRAPER_INTERVAL', '21600'))  # 6 hours
+                logger.info(f"Waiting {wait_time} seconds before next run...")
+                
+                for _ in range(wait_time):
                     if shutdown_requested:
-                        return False
-                        
-                    logger.info(f"Attempting to navigate to homepage (attempt {nav_attempt + 1}/{max_nav_retries})")
-                    print(f"Connecting to hkmovie6.com... (attempt {nav_attempt + 1}/{max_nav_retries})")
-                    
-                    try:
-                        if scraper.navigate_to_homepage():
-                            logger.info("Successfully navigated to hkmovie6.com")
-                            print("Successfully connected to hkmovie6.com")
-                            navigation_success = True
-                            break
-                        else:
-                            logger.warning(f"Failed to navigate to homepage on attempt {nav_attempt + 1}")
-                            print(f"Failed to connect on attempt {nav_attempt + 1}")
-                    except Exception as nav_error:
-                        if is_cloudflare_or_blocking(str(nav_error)):
-                            logger.warning(f"Detected blocking/Cloudflare on navigation attempt {nav_attempt + 1}: {nav_error}")
-                            print(f"Detected blocking/Cloudflare, retrying...")
-                        else:
-                            logger.error(f"Navigation error on attempt {nav_attempt + 1}: {nav_error}")
-                            
-                if not navigation_success:
-                    raise Exception("Failed to navigate to homepage after all retry attempts")
+                        break
+                    await asyncio.sleep(1)
                 
-                # Scrape movie showings with retry logic
-                max_retries = 5  # Increased retry attempts
-                movies = []
-                
-                for attempt in range(max_retries):
-                    if shutdown_requested:
-                        return False
-                        
-                    logger.info(f"Attempting to scrape movies (attempt {attempt + 1}/{max_retries})")
-                    print(f"Scraping movies... (attempt {attempt + 1}/{max_retries})")
-                    
-                    try:
-                        movies = scraper.scrape_movie_showings()
-                        
-                        if movies:
-                            logger.info(f"Successfully scraped {len(movies)} movies")
-                            print(f"Found {len(movies)} movies")
-                            break
-                        else:
-                            logger.warning(f"No movies found on attempt {attempt + 1}")
-                            print(f"No movies found on attempt {attempt + 1}")
-                    except Exception as movie_error:
-                        if is_cloudflare_or_blocking(str(movie_error)):
-                            logger.warning(f"Detected blocking/Cloudflare while scraping movies: {movie_error}")
-                            print(f"Detected blocking/Cloudflare, retrying...")
-                        else:
-                            logger.error(f"Error scraping movies on attempt {attempt + 1}: {movie_error}")
-                            
-                        if attempt < max_retries - 1:
-                            # Reload the page to handle Cloudflare or missing elements
-                            logger.info("Reloading page to handle potential blocking...")
-                            try:
-                                scraper.navigate_to_homepage()
-                            except Exception as reload_error:
-                                logger.error(f"Failed to reload page: {reload_error}")
-                
-                if not movies:
-                    logger.error("Failed to find movies after all retry attempts")
-                    print("Failed to find movies after all retry attempts")
-                    return False
-                
-                # Save to CSV
-                scraper.save_movies_to_csv(movies, "movies.csv")
-                print("Movies saved to movies.csv")
-                
-                # Scrape cinemas with retry logic
-                cinemas = []
-                for attempt in range(max_retries):
-                    if shutdown_requested:
-                        return False
-                        
-                    try:
-                        cinemas = scraper.scrape_cinemas()
-                        if cinemas:
-                            logger.info(f"Successfully scraped {len(cinemas)} cinemas")
-                            print(f"\nFound {len(cinemas)} cinemas")
-                            break
-                        else:
-                            logger.warning(f"No cinemas found on attempt {attempt + 1}")
-                    except Exception as cinema_error:
-                        if is_cloudflare_or_blocking(str(cinema_error)):
-                            logger.warning(f"Detected blocking/Cloudflare while scraping cinemas: {cinema_error}")
-                            try:
-                                scraper.navigate_to_homepage()
-                            except Exception as reload_error:
-                                logger.error(f"Failed to reload page: {reload_error}")
-                        else:
-                            logger.error(f"Error scraping cinemas on attempt {attempt + 1}: {cinema_error}")
-                
-                if cinemas:
-                    # Save to CSV
-                    scraper.save_cinemas_to_csv(cinemas, "cinemas.csv")
-                    print("Cinemas saved to cinemas.csv")
-                else:
-                    logger.warning("No cinemas found")
-                    print("No cinemas found")
-                
-                # Scrape detailed information
-                if movies:
-                    print(f"\nScraping detailed information for {len(movies)} movies...")
-                    scraper.scrape_all_movie_details("movies.csv", "movies_details.csv")
-                    print("Movie details saved to movies_details.csv")
-                
-                if cinemas:
-                    print(f"\nScraping detailed information for {len(cinemas)} cinemas...")
-                    scraper.scrape_all_cinema_details("cinemas.csv", "cinemas_details.csv")
-                    print("Cinema details saved to cinemas_details.csv")
-                
-                return True
-                
-        except Exception as e:
-            error_msg = str(e)
-            logger.error(f"Error running scraper (restart attempt {browser_restart_count + 1}): {error_msg}")
-            
-            # Check if this is a browser error that requires restart
-            if is_browser_error(e):
-                browser_restart_count += 1
-                if browser_restart_count <= max_browser_restarts:
-                    logger.warning(f"Browser error detected, restarting browser (attempt {browser_restart_count}/{max_browser_restarts})")
-                    print(f"Browser error detected, restarting... (attempt {browser_restart_count}/{max_browser_restarts})")
-                    continue  # Try again with new browser instance
-                else:
-                    logger.error(f"Max browser restart attempts ({max_browser_restarts}) exceeded")
-                    print(f"Max browser restart attempts exceeded")
-                    return False
             else:
-                # Not a browser error, don't restart
-                logger.error(f"Non-browser error: {error_msg}")
-                print(f"Error: {error_msg}")
-                return False
+                consecutive_failures += 1
+                logger.warning(f"Scraping failed (attempt {consecutive_failures}/{max_consecutive_failures})")
+                
+                if consecutive_failures >= max_consecutive_failures:
+                    logger.error("Max consecutive failures reached, longer delay before retry...")
+                    delay = base_delay * (2 ** min(consecutive_failures - max_consecutive_failures, 5))
+                    consecutive_failures = 0  # Reset after long delay
+                else:
+                    delay = base_delay * consecutive_failures
+                
+                logger.info(f"Waiting {delay} seconds before retry...")
+                for _ in range(delay):
+                    if shutdown_requested:
+                        break
+                    await asyncio.sleep(1)
+                        
+        except KeyboardInterrupt:
+            logger.info("Keyboard interrupt received, shutting down...")
+            shutdown_requested = True
+            break
+            
+        except Exception as e:
+            consecutive_failures += 1
+            error_msg = str(e)
+            
+            if detect_browser_errors(error_msg):
+                logger.error(f"Browser error detected: {error_msg}")
+                logger.warning("Restarting browser due to detected browser error...")
+            else:
+                logger.error(f"Unexpected error in main loop: {error_msg}")
+            
+            # Cleanup current scraper
+            if current_scraper:
+                try:
+                    await current_scraper.cleanup()
+                except Exception as cleanup_error:
+                    logger.error(f"Error during cleanup: {cleanup_error}")
+                finally:
+                    current_scraper = None
+            
+            # Wait before retry
+            delay = base_delay * min(consecutive_failures, 5)
+            logger.info(f"Waiting {delay} seconds before retry...")
+            for _ in range(delay):
+                if shutdown_requested:
+                    break
+                await asyncio.sleep(1)
     
-    return False
+    # Final cleanup
+    if current_scraper:
+        try:
+            logger.info("Performing final cleanup...")
+            await current_scraper.cleanup()
+        except Exception as e:
+            logger.error(f"Error during final cleanup: {e}")
+        finally:
+            current_scraper = None
+    
+    logger.info("Movie scraper shutdown complete")
 
 def main():
-    """Main function."""
-    start_time = datetime.now()
+    """Main entry point for the movie scraper application."""
+    setup_logging()
+    setup_signal_handlers()
+    
+    logger = logging.getLogger(__name__)
+    logger.info("Movie scraper application starting...")
     
     try:
-        print("🚀 Starting Movie Scraper")
-        print("Press Ctrl+C to stop gracefully")
+        # Check for required environment variables
+        required_env_vars = ['SUPABASE_URL', 'SUPABASE_KEY']
+        missing_vars = [var for var in required_env_vars if not os.getenv(var)]
         
-        success = run_scraper_with_retry()
-        
-        end_time = datetime.now()
-        duration = end_time - start_time
-        
-        if success:
-            logger.info(f"Scraper completed successfully in {duration}")
-            print(f"✅ Scraper completed successfully in {duration}")
-        else:
-            logger.error(f"Scraper failed after {duration}")
-            print(f"❌ Scraper failed after {duration}")
+        if missing_vars:
+            logger.error(f"Missing required environment variables: {missing_vars}")
+            logger.error("Please check your .env file or environment configuration")
             sys.exit(1)
         
-    except KeyboardInterrupt:
-        logger.info("Scraper interrupted by user")
-        print("\n⚠️ Scraper interrupted by user")
-        sys.exit(0)
+        # Log configuration
+        logger.info(f"Environment: {os.getenv('ENV', 'development')}")
+        logger.info(f"Run mode: {'One-time' if os.getenv('RUN_ONCE', 'false').lower() == 'true' else 'Continuous'}")
+        logger.info(f"Scraper timeout: {os.getenv('SCRAPER_TIMEOUT', '120')}s")
+        logger.info(f"Default delay: {os.getenv('DEFAULT_DELAY', '1')}s")
         
+        # Run the scraper
+        try:
+            asyncio.run(run_scraper_with_recovery())
+        except KeyboardInterrupt:
+            logger.info("Application interrupted by user")
+        except Exception as e:
+            logger.error(f"Fatal error in main: {e}")
+            sys.exit(1)
+            
     except Exception as e:
-        end_time = datetime.now()
-        duration = end_time - start_time
-        logger.error(f"Scraper failed after {duration}: {e}")
-        print(f"❌ Scraper failed after {duration}: {e}")
+        logger.error(f"Failed to start application: {e}")
         sys.exit(1)
+    
+    logger.info("Application shutdown complete")
 
 if __name__ == "__main__":
     main() 

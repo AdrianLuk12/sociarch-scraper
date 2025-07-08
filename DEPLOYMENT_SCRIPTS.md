@@ -57,7 +57,7 @@ This document explains the purpose of each deployment script in the movie scrape
 - **Usage**: `./health_check.sh`
 - **Features**: Process detection, exit codes for automation
 
-## 🚀 Quick Start Commands
+## Quick Start Commands
 
 ### Local Development
 ```bash
@@ -87,7 +87,7 @@ sudo cp movie-scraper.service /etc/systemd/system/
 sudo systemctl enable movie-scraper.service
 ```
 
-## 📊 Script Dependencies
+## Script Dependencies
 
 ```
 main.py

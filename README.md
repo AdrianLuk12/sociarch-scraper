@@ -2,20 +2,20 @@
 
 A robust and efficient movie data scraper optimized for both local development and EC2 cloud deployment. This scraper extracts comprehensive movie information including names, categories, descriptions, cinema details, and showtimes from [hkmovie6.com](https://hkmovie6.com/).
 
-## ✨ Key Features
+## Key Features
 
-- **🌐 Modern Browser Automation**: Uses Zendriver for fast, reliable browser automation
-- **🔄 Intelligent Retry Logic**: Advanced error handling with automatic page reloading for Cloudflare detection
-- **🔄 Smart Browser Restart**: Automatic browser restart on connection failures and timeouts
-- **⚡ Optimized Performance**: Reduced delays and timeouts for faster scraping
-- **☁️ EC2 Ready**: Optimized for AWS EC2 deployment with auto-start/stop capabilities
-- **🎯 Cloudflare Detection**: Automatically detects and handles Cloudflare challenges
-- **🔐 Comprehensive Error Handling**: Enhanced browser error detection and recovery
-- **📊 Dual Output Options**: Saves data to both CSV files and Supabase database
-- **🚫 Smart Duplicate Prevention**: Checks for existing records to avoid redundant data
-- **🕐 Flexible Execution**: Manual execution optimized for scheduled cloud instances
+- **Modern Browser Automation**: Uses Zendriver for fast, reliable browser automation
+- **Intelligent Retry Logic**: Advanced error handling with automatic page reloading for Cloudflare detection
+- **Smart Browser Restart**: Automatic browser restart on connection failures and timeouts
+- **Optimized Performance**: Reduced delays and timeouts for faster scraping
+- **Cloud Ready**: Optimized for AWS EC2 deployment with auto-start/stop capabilities
+- **Cloudflare Detection**: Automatically detects and handles Cloudflare challenges
+- **Comprehensive Error Handling**: Enhanced browser error detection and recovery
+- **Dual Output Options**: Saves data to both CSV files and Supabase database
+- **Smart Duplicate Prevention**: Checks for existing records to avoid redundant data
+- **Flexible Execution**: Manual execution optimized for scheduled cloud instances
 
-## 🏗️ Project Structure
+## Project Structure
 
 ```
 sociarch-scraper/
@@ -37,7 +37,7 @@ sociarch-scraper/
 └── README.md               # This file
 ```
 
-## 📊 Database Schema
+## Database Schema
 
 The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 
@@ -45,7 +45,7 @@ The scraper uses a `knowledge_base` schema in Supabase with three main tables:
 - **cinemas**: Store cinema information (name, url, address, created_at)  
 - **showtimes**: Store comprehensive showtime data linking movies and cinemas with timestamps and language info
 
-## 🚀 Quick Start (Local Development)
+## Quick Start (Local Development)
 
 ### 1. Clone and Setup
 ```bash
@@ -84,7 +84,7 @@ python test_setup.py
 python main.py
 ```
 
-## ☁️ AWS EC2 Deployment Guide (Web Console)
+## AWS EC2 Deployment Guide (Web Console)
 
 ### Phase 1: EC2 Instance Setup
 
@@ -336,7 +336,7 @@ tail -f /home/ec2-user/sociarch-scraper/movie_scraper.log
 - `NO_SANDBOX`: Disable Chrome sandbox (default: 'true' for EC2)
 - `SCRAPER_TIMEOUT`: Individual page timeout in seconds (default: 120)
 
-## 🚀 How It Works
+## How It Works
 
 ### Enhanced Error Handling
 - **Browser Error Detection**: Automatically detects and handles browser crashes, connection failures, and timeouts
@@ -448,7 +448,7 @@ chmod +x /home/ec2-user/health_check.sh
 - **Custom Metrics**: Track scraping success rates and execution time
 - **Alarms**: Set up alerts for failures or timeouts
 
-## 🔐 Security Best Practices
+## Security Best Practices
 
 1. **Security Groups**: Restrict SSH access to your IP only
 2. **Key Management**: Use strong SSH key pairs, rotate regularly

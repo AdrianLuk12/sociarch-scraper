@@ -10,7 +10,7 @@ from dotenv import load_dotenv, find_dotenv
 
 def test_environment():
     """Test environment variables."""
-    print("🔍 Testing environment variables...")
+    print("Testing environment variables...")
     
     load_dotenv(find_dotenv())
     
@@ -22,68 +22,61 @@ def test_environment():
     for var in required_vars:
         value = os.getenv(var)
         if value:
-            print(f"  ✅ {var}: {'*' * min(len(value), 20)}...")
+            print(f"  [OK] {var}: {'*' * min(len(value), 20)}...")
         else:
-            print(f"  ❌ {var}: Missing")
+            print(f"  [FAIL] {var}: Missing")
             missing_required.append(var)
     
     for var in optional_vars:
         value = os.getenv(var)
         if value:
-            print(f"  ✅ {var}: {value}")
+            print(f"  [OK] {var}: {value}")
         else:
-            print(f"  ⚠️  {var}: Not set (using default)")
+            print(f"  [WARN] {var}: Not set (using default)")
     
     if missing_required:
-        print(f"\n❌ Missing required environment variables: {', '.join(missing_required)}")
+        print(f"\n[FAIL] Missing required environment variables: {', '.join(missing_required)}")
         print("Please check your .env file and ensure all required variables are set.")
         return False
     
-    print("\n✅ Environment variables look good!")
+    print("\n[OK] Environment variables look good!")
     return True
 
 
 def test_imports():
     """Test that all modules can be imported."""
-    print("\n🔍 Testing module imports...")
+    print("\nTesting module imports...")
     
     try:
         import zendriver as zd
-        print("  ✅ Zendriver imported successfully")
+        print("  [OK] Zendriver imported successfully")
     except ImportError as e:
-        print(f"  ❌ Zendriver import failed: {e}")
+        print(f"  [FAIL] Zendriver import failed: {e}")
         return False
     
     try:
         from supabase import create_client
-        print("  ✅ Supabase imported successfully")
+        print("  [OK] Supabase imported successfully")
     except ImportError as e:
-        print(f"  ❌ Supabase import failed: {e}")
-        return False
-    
-    try:
-        from apscheduler.schedulers.blocking import BlockingScheduler
-        print("  ✅ APScheduler imported successfully")
-    except ImportError as e:
-        print(f"  ❌ APScheduler import failed: {e}")
+        print(f"  [FAIL] Supabase import failed: {e}")
         return False
     
     try:
         # Test local modules
         from db.supabase_client import SupabaseClient
-        from scraper.movie_scraper import MovieScraper, MovieScraperSync
-        print("  ✅ Local modules imported successfully")
+        from scraper.movie_scraper import MovieScraper
+        print("  [OK] Local modules imported successfully")
     except ImportError as e:
-        print(f"  ❌ Local module import failed: {e}")
+        print(f"  [FAIL] Local module import failed: {e}")
         return False
     
-    print("\n✅ All imports successful!")
+    print("\n[OK] All imports successful!")
     return True
 
 
 def test_zendriver():
     """Test Zendriver setup."""
-    print("\n🔍 Testing Zendriver...")
+    print("\nTesting Zendriver...")
     
     try:
         import zendriver as zd
@@ -120,65 +113,65 @@ def test_zendriver():
         success, result = asyncio.run(test_browser())
         
         if success:
-            print(f"  ✅ Zendriver test successful (navigated to Google: '{result}')")
+            print(f"  [OK] Zendriver test successful (navigated to Google: '{result}')")
             return True
         else:
-            print(f"  ❌ Zendriver test failed: {result}")
+            print(f"  [FAIL] Zendriver test failed: {result}")
             return False
         
     except Exception as e:
-        print(f"  ❌ Zendriver test failed: {e}")
-        print("  💡 Make sure Chrome browser is installed on your system")
+        print(f"  [FAIL] Zendriver test failed: {e}")
+        print("  [TIP] Make sure Chrome browser is installed on your system")
         return False
 
 
 def test_database_connection():
     """Test database connection."""
-    print("\n🔍 Testing database connection...")
+    print("\nTesting database connection...")
     
     try:
         from db.supabase_client import SupabaseClient
         
         client = SupabaseClient()
-        print("  ✅ Supabase client initialized successfully")
+        print("  [OK] Supabase client initialized successfully")
         
         # Test a simple database operation (this will fail if credentials are wrong)
         # We'll just test the connection, not actual operations
-        print("  ✅ Database connection test passed")
+        print("  [OK] Database connection test passed")
         return True
         
     except ValueError as e:
-        print(f"  ❌ Database connection failed: {e}")
-        print("  💡 Check your SUPABASE_URL and SUPABASE_KEY in .env file")
+        print(f"  [FAIL] Database connection failed: {e}")
+        print("  [TIP] Check your SUPABASE_URL and SUPABASE_KEY in .env file")
         return False
     except Exception as e:
-        print(f"  ❌ Database test failed: {e}")
+        print(f"  [FAIL] Database test failed: {e}")
         return False
 
 
 def test_scraper_initialization():
     """Test scraper initialization."""
-    print("\n🔍 Testing scraper initialization...")
+    print("\nTesting scraper initialization...")
     
     try:
-        from scraper.movie_scraper import MovieScraperSync
+        from scraper.movie_scraper import MovieScraper
         
-        # Test sync wrapper initialization
-        scraper = MovieScraperSync(headless=True, delay=1)
-        print("  ✅ MovieScraperSync initialized successfully")
+        # Test async scraper initialization
+        scraper = MovieScraper(headless=True, delay=1)
+        print("  [OK] MovieScraper initialized successfully")
         
-        # Test context manager (without actually running scraper)
-        print("  ✅ Scraper setup test passed")
+        # Test scraper setup
+        print("  [OK] Scraper setup test passed")
         return True
         
     except Exception as e:
-        print(f"  ❌ Scraper initialization test failed: {e}")
+        print(f"  [FAIL] Scraper initialization test failed: {e}")
         return False
 
 
 def main():
     """Run all tests."""
-    print("🧪 Movie Scraper Setup Test")
+    print("Movie Scraper Setup Test")
     print("=" * 40)
     
     tests = [
@@ -197,19 +190,18 @@ def main():
             if test():
                 passed += 1
         except Exception as e:
-            print(f"  ❌ Test failed with unexpected error: {e}")
+            print(f"  [FAIL] Test failed with unexpected error: {e}")
     
     print("\n" + "=" * 40)
-    print(f"📊 Test Results: {passed}/{total} tests passed")
+    print(f"Test Results: {passed}/{total} tests passed")
     
     if passed == total:
-        print("🎉 All tests passed! Your setup is ready.")
+        print("All tests passed! Your setup is ready.")
         print("\nYou can now run:")
-        print("  python main.py                # Run the movie scraper")
-        print("  ./start_scraper.sh            # Run with EC2-optimized settings")
+        print("  python main.py                    # Run the scraper once")
+        print("  RUN_ONCE=true python main.py     # Explicit one-time run")
     else:
-        print("⚠️  Some tests failed. Please fix the issues above before running the scraper.")
-        sys.exit(1)
+        print("Some tests failed. Please fix the issues above before running the scraper.")
 
 
 if __name__ == "__main__":
