@@ -138,53 +138,31 @@ class MovieScraper:
             # Detect if running on EC2
             is_ec2 = os.getenv('ENV', '').lower() == 'production' or self._is_ec2_environment()
             
-            # Base Chrome options for zendriver
+            # Chrome options as specified by user
             browser_args = [
-                "--disable-dev-shm-usage",
-                "--disable-gpu", 
-                "--disable-extensions",
-                "--disable-plugins",
-                "--disable-images",  # Faster loading
-                "--disable-javascript-harmony-shipping",
-                "--disable-background-timer-throttling",
-                "--disable-background-networking",
-                "--disable-client-side-phishing-detection",
-                "--disable-sync",
-                "--disable-translate",
-                "--hide-scrollbars",
-                "--metrics-recording-only",
-                "--mute-audio",
+                "--remote-allow-origins=*",
                 "--no-first-run",
-                "--safebrowsing-disable-auto-update",
-                "--disable-ipc-flooding-protection"
+                "--no-service-autorun", 
+                "--no-default-browser-check",
+                "--homepage=about:blank",
+                "--no-pings",
+                "--password-store=basic",
+                "--disable-infobars",
+                "--disable-breakpad",
+                "--disable-component-update",
+                "--disable-backgrounding-occluded-windows",
+                "--disable-renderer-backgrounding",
+                "--disable-background-networking",
+                "--disable-dev-shm-usage",
+                "--disable-features=IsolateOrigins,DisableLoadExtensionCommandLineSwitch,site-per-process",
+                "--disable-session-crashed-bubble",
+                "--disable-search-engine-choice-screen",
+                "--user-data-dir=/tmp/uc_chrome_data",
+                "--disable-gpu",
+                "--headless=new",
+                "--remote-debugging-host=127.0.0.1",
+                "--remote-debugging-port=34613"
             ]
-            
-            # Add EC2-specific flags to prevent hanging
-            if is_ec2:
-                browser_args.extend([
-                    "--single-process",  # Critical for EC2
-                    "--disable-software-rasterizer",
-                    "--disable-background-mode",
-                    "--disable-default-apps",
-                    "--disable-background-networking",
-                    "--disable-features=VizDisplayCompositor",
-                    "--disable-features=TranslateUI",
-                    "--disable-features=BlinkGenPropertyTrees",
-                    "--disable-web-security",  # Sometimes needed on EC2
-                    "--disable-accelerated-2d-canvas",
-                    "--disable-accelerated-jpeg-decoding",
-                    "--disable-accelerated-mjpeg-decode",
-                    "--disable-accelerated-video-decode",
-                    "--memory-pressure-off",
-                    "--max_old_space_size=4096",
-                    "--disable-renderer-backgrounding",
-                    "--disable-backgrounding-occluded-windows",
-                    "--disable-background-mode",
-                    "--disable-features=AudioServiceOutOfProcess",
-                    "--autoplay-policy=user-gesture-required",
-                    "--disable-domain-reliability"
-                ])
-                logger.info("Applied EC2-specific Chrome optimization flags")
             
             # Read NO_SANDBOX from environment - default to true for EC2
             no_sandbox = os.getenv('NO_SANDBOX', 'true').lower() in ('true', '1', 'yes', 'on')
