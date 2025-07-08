@@ -71,10 +71,11 @@ else
     echo "[FAIL] Chrome not found."
     if [ "$IS_EC2" = "true" ]; then
         echo "[INFO] Installing Google Chrome on EC2..."
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null
-        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list'
-        sudo apt update -y >/dev/null 2>&1
-        sudo apt install -y google-chrome-stable >/dev/null 2>&1
+        mkdir google-chrome
+        cd google-chrome
+        wget https://dl.google.com/linux/direct/google-chrome-stable_current_x86_64.rpm
+        sudo dnf install ./google-chrome-stable_current_x86_64.rpm
+        cd ../
         
         if command_exists google-chrome; then
             echo "[OK] Chrome installed successfully: $(google-chrome --version)"
