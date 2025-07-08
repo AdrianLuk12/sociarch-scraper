@@ -34,11 +34,6 @@ echo "[INFO] Detected OS: $OS $VER"
 # Check if running on EC2
 if is_ec2; then
     echo "[INFO] Running on EC2 (detected user: $USER)"
-    # Try to get instance ID if metadata service is available
-    INSTANCE_ID=$(curl -s --connect-timeout 2 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null || echo "unknown")
-    if [ "$INSTANCE_ID" != "unknown" ]; then
-        echo "[INFO] Instance ID: $INSTANCE_ID"
-    fi
 else
     echo "[WARN] Not running on EC2 (user: $USER) - continuing anyway"
 fi

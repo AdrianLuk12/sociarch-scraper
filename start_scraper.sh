@@ -63,7 +63,7 @@ export DEFAULT_DELAY=1
 if [ "$IS_EC2" = "true" ] && ! pgrep Xvfb > /dev/null 2>&1; then
     echo "[INFO] Starting virtual display for EC2..."
     if command_exists Xvfb; then
-        Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
+        # Xvfb :99 -screen 0 1024x768x24 > /dev/null 2>&1 &
         sleep 2
     else
         echo "[WARN] Xvfb not found, relying on headless mode"
