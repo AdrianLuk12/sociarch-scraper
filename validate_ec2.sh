@@ -4,14 +4,6 @@
 echo "Validating EC2 Movie Scraper Deployment"
 echo "========================================"
 
-# Check if running on EC2
-INSTANCE_ID=$(curl -s --connect-timeout 5 http://169.254.169.254/latest/meta-data/instance-id 2>/dev/null)
-if [ $? -eq 0 ] && [ -n "$INSTANCE_ID" ]; then
-    echo "[OK] Running on EC2 instance: $INSTANCE_ID"
-else
-    echo "[WARN] Not running on EC2 (this is OK for local testing)"
-fi
-
 # Check Python installation
 if command -v python3 &> /dev/null; then
     echo "[OK] Python 3 found: $(python3 --version)"
