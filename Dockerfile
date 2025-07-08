@@ -56,6 +56,11 @@ RUN arch=$(dpkg --print-architecture) && \
         ln -sf /usr/bin/chromium /usr/bin/google-chrome; \
     fi
 
+# Create a non-root user for running Chrome
+RUN groupadd -r appuser && useradd -r -g appuser -G audio,video appuser \
+    && mkdir -p /home/appuser/Downloads \
+    && chown -R appuser:appuser /home/appuser
+
 # Set working directory
 WORKDIR /app
 
@@ -68,13 +73,17 @@ RUN pip install --no-cache-dir -r requirements.txt
 # Copy application code
 COPY . .
 
-# Create directory for temporary files
-RUN mkdir -p /tmp/scraper_output
+# Create directory for temporary files and set permissions
+RUN mkdir -p /tmp/scraper_output \
+    && chown -R appuser:appuser /app /tmp/scraper_output
 
 # Set environment variables for containerized Chrome
 ENV HEADLESS_MODE=true
 ENV NO_SANDBOX=true
 ENV DISPLAY=:99
+
+# Switch to non-root user
+USER appuser
 
 # Set the entrypoint
 ENTRYPOINT ["python", "scraper/main.py"] 

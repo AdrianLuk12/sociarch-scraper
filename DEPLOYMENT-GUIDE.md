@@ -29,6 +29,8 @@ sociarch-scraper/
 ├── Dockerfile                    # Multi-arch container configuration
 ├── .dockerignore                 # Docker build exclusions
 ├── build-local.sh               # Local build script (Apple Silicon compatible)
+├── check-image.sh               # Architecture verification script
+├── update-and-deploy.sh         # Update/rebuild helper script
 ├── README-ECS-EC2.md            # Detailed ECS+EC2 Console deployment guide
 ├── DEPLOYMENT-GUIDE.md          # This file
 ├── requirements.txt             # Python dependencies (cleaned)

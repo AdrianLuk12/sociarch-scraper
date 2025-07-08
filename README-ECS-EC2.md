@@ -27,7 +27,7 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
 
 1. Go to **Amazon ECR** in AWS Console
 2. Click **"Create repository"**
-3. Set **Repository name**: `movie-scraper`
+3. Set **Repository name**: `sociarch/movie-scraper`
 4. Leave other settings as default
 5. Click **"Create repository"**
 6. **Note the repository URI** (you'll need it later)
@@ -39,9 +39,11 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
    chmod +x build-local.sh
    ./build-local.sh
    ```
+   
+   This creates a local Docker image tagged as `sociarch/movie-scraper:latest`
 
 2. **Get your ECR push commands from AWS Console**:
-   - Go to **Amazon ECR** → **Repositories** → `movie-scraper`
+   - Go to **Amazon ECR** → **Repositories** → `sociarch/movie-scraper`
    - Click **"View push commands"** button
    - Copy and run the commands shown (they'll look like this):
 
@@ -50,11 +52,11 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
    # Login to ECR (from console)
    aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
    
-   # Tag your local image
-   docker tag movie-scraper:latest YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/movie-scraper:latest
+   # Tag your local image (note: use sociarch/movie-scraper as built by build-local.sh)
+   docker tag sociarch/movie-scraper:latest YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/sociarch/movie-scraper:latest
    
    # Push to ECR
-   docker push YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/movie-scraper:latest
+   docker push YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/sociarch/movie-scraper:latest
    ```
 
 4. **Alternative: Manual upload via Console** (if you prefer not to use CLI at all):
@@ -73,6 +75,8 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
    - **Name**: `/movie-scraper/supabase-key`
    - **Type**: `SecureString`
    - **Value**: Your Supabase anon key
+
+> 💡 **Note**: Keep the parameter names as `/movie-scraper/...` (without the "sociarch/" prefix) for consistency with the application code.
 
 ### Step 4: Create ECS Cluster with EC2
 
@@ -98,9 +102,11 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
 3. Attach policy: `AmazonECSTaskExecutionRolePolicy`
 4. **Role name**: `movie-scraper-execution-role`
 
-#### Task Role (for accessing SSM)
-1. Create another role with same service selection
-2. Create custom policy:
+#### Task Role (for accessing SSM Parameters)
+1. **Create the custom policy first**:
+   - Go to **IAM** → **Policies** → **Create policy**
+   - Click **"JSON"** tab
+   - Replace the content with:
    ```json
    {
      "Version": "2012-10-17",
@@ -111,12 +117,29 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
            "ssm:GetParameters",
            "ssm:GetParameter"
          ],
-         "Resource": "arn:aws:ssm:us-east-2:YOUR_ACCOUNT_ID:parameter/movie-scraper/*"
+         "Resource": "*"
        }
      ]
    }
    ```
-3. **Role name**: `movie-scraper-task-role`
+   - Click **"Next: Tags"** (skip tags)
+   - Click **"Next: Review"**
+   - **Policy name**: `MovieScraperSSMAccess`
+   - **Description**: `Allows access to SSM parameters for movie scraper`
+   - Click **"Create policy"**
+
+2. **Create the role**:
+   - Go to **IAM** → **Roles** → **Create role**
+   - Select **"AWS service"** → **"Elastic Container Service"** → **"Elastic Container Service Task"**
+   - Click **"Next: Permissions"**
+   - Search for and select: `MovieScraperSSMAccess` (the policy you just created)
+   - Click **"Next: Tags"** (skip tags)
+   - Click **"Next: Review"**
+   - **Role name**: `movie-scraper-task-role`
+   - **Description**: `Task role for movie scraper to access SSM parameters`
+   - Click **"Create role"**
+
+> 💡 **Note**: Using `"Resource": "*"` is simpler for console creation. For production, you can later edit the policy to restrict to specific parameter paths: `arn:aws:ssm:us-east-2:YOUR_ACCOUNT_ID:parameter/movie-scraper/*`
 
 ### Step 6: Create Task Definition
 
@@ -127,13 +150,13 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
    - **Task Role**: `movie-scraper-task-role`
    - **Task execution role**: `movie-scraper-execution-role`
    - **Network Mode**: `bridge`
-   - **Task memory**: `1024` MiB
-   - **Task CPU**: `512` CPU units
+   - **Task memory**: `2048` MiB (2GB recommended for reliable browser startup)
+   - **Task CPU**: `1024` CPU units (1 vCPU recommended)
 
 4. **Add Container**:
    - **Container name**: `movie-scraper`
-   - **Image**: `YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/movie-scraper:latest` (use your actual ECR URI from Step 2)
-   - **Memory Limits**: Soft limit `1024` MiB
+   - **Image**: `YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/sociarch/movie-scraper:latest` (use your actual ECR URI from Step 2)
+   - **Memory Limits**: Soft limit `2048` MiB
    - **Port mappings**: None needed
    - **Environment variables**:
      - `HEADLESS_MODE`: `true`
@@ -216,11 +239,30 @@ This guide covers deploying the movie scraper on **Amazon ECS with EC2 instances
    - Increase task memory limit (try 2048 MiB)
    - Consider upgrading EC2 instance type
 
-3. **Browser issues**:
-   - Ensure `NO_SANDBOX=true` environment variable
-   - Check Docker image has all Chrome dependencies
+3. **Browser timeout errors ("timed out during opening handshake")**:
+   - **Most common issue**: Browser startup timeout in containerized environment
+   - **Primary solution**: Increase ECS task resources:
+     - **Memory**: Change from 1024 MiB to 2048 MiB (or higher)
+     - **CPU**: Change from 512 to 1024 CPU units (or higher)
+   - **Why this happens**: Chrome needs more time/resources to start in containers
+   - **Automatic retry**: The scraper now includes 3 retry attempts with progressive timeouts
+   - **Check logs**: Look for "Browser initialization attempt X/3" messages
 
-4. **SSM parameter access denied**:
+4. **Browser connection failures ("Failed to connect to browser")**:
+   - **Most common cause**: Container running as root
+   - **Solution**: Rebuild image with latest Dockerfile (includes non-root user)
+   - **Verify**: Check CloudWatch logs for "Starting browser with headless=true, no_sandbox=True"
+   - **Environment**: Ensure `NO_SANDBOX=true` is set in task definition
+   - **Memory**: Ensure minimum 2GB memory allocation for Chrome
+
+5. **"no matching manifest for linux/amd64" error**:
+   - **Cause**: Image built for wrong architecture (arm64 instead of amd64)
+   - **Check**: Run `./check-image.sh` to verify image architecture
+   - **Solution**: Rebuild with: `./build-local.sh` (uses docker buildx)
+   - **Verify**: Image should show "Architecture: amd64" after rebuild
+   - **Note**: Docker buildx is required for cross-platform builds on Apple Silicon
+
+6. **SSM parameter access denied**:
    - Verify task role has SSM permissions
    - Check parameter names match exactly
 
@@ -245,10 +287,29 @@ For further cost savings:
 ## Maintenance Tasks
 
 ### Updating the Application
-1. Build new Docker image locally
-2. Push to ECR with new tag
-3. Update task definition with new image URI
-4. Next scheduled run will use new image
+
+#### After Code Changes (like browser fixes)
+1. **Rebuild the Docker image**:
+   ```bash
+   ./build-local.sh
+   ```
+
+2. **Push to ECR** (get commands from AWS Console):
+   ```bash
+   # Example commands (replace with your actual values)
+   aws ecr get-login-password --region us-east-2 | docker login --username AWS --password-stdin YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com
+   docker tag sociarch/movie-scraper:latest YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/sociarch/movie-scraper:latest
+   docker push YOUR_ACCOUNT_ID.dkr.ecr.us-east-2.amazonaws.com/sociarch/movie-scraper:latest
+   ```
+
+3. **Force new deployment** (no task definition changes needed):
+   - Go to **ECS** → **Clusters** → `movie-scraper-cluster` → **Services**
+   - If you have a service: Click **"Update Service"** → **"Force new deployment"**
+   - For scheduled tasks: Next run will automatically use the new image
+
+4. **Test manually**:
+   - Run a manual ECS task to verify the browser connection works
+   - Check CloudWatch logs for successful browser initialization
 
 ### Monitoring Cluster Health
 1. Check EC2 instances in ECS console

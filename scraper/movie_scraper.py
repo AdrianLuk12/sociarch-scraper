@@ -7,6 +7,7 @@ import time
 import asyncio
 import csv
 import subprocess
+import traceback
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, date
 import zendriver as zd
@@ -132,54 +133,150 @@ class MovieScraper:
         """Async context manager exit"""
         await self.close()
     
-    async def _setup_browser(self):
-        """Set up the Zendriver browser with options"""
-        try:
-            # Log RAM status before browser setup
-            self._log_ram_status("Before Browser Setup")
-            
-            # Chrome options for zendriver - enhanced anti-detection
-            browser_args = [
-                "--disable-dev-shm-usage",
-                "--disable-gpu",
-                "--disable-web-security",
-                "--disable-features=VizDisplayCompositor",
-                "--disable-extensions",
-                "--disable-plugins",
-                "--disable-images",  # Reduce bandwidth and loading time
-                "--disable-javascript-harmony-shipping",
-                "--disable-background-timer-throttling",
-                "--disable-backgrounding-occluded-windows",
-                "--disable-renderer-backgrounding",
-                "--disable-field-trial-config",
-                "--disable-back-forward-cache",
-                "--disable-ipc-flooding-protection",
-                "--no-first-run",
-                "--no-default-browser-check",
-                "--no-pings",
-                # "--disable-blink-features=AutomationControlled",
-                # "--no-sandbox"
-            ]
-            
-            # Read NO_SANDBOX from environment
-            no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
-            
-            # Start browser with zendriver using correct parameter names
-            self.browser = await zd.start(
-                headless=self.headless,
-                browser_args=browser_args,
-                lang="en-US",
-                no_sandbox=no_sandbox
-            )
-            
-            logger.info("Zendriver browser initialized successfully")
-            
-            # Log RAM status after browser setup
-            self._log_ram_status("After Browser Setup")
-            
-        except Exception as e:
-            logger.error(f"Failed to initialize browser: {e}")
-            raise
+    async def _setup_browser(self, max_retries: int = 3):
+        """Set up the Zendriver browser with options and retry logic"""
+        last_error = None
+        
+        for attempt in range(max_retries):
+            try:
+                logger.info(f"Browser initialization attempt {attempt + 1}/{max_retries}")
+                
+                # Log RAM status before browser setup
+                self._log_ram_status("Before Browser Setup")
+                
+                # Chrome options for zendriver - optimized for containers with better stability
+                browser_args = [
+                    "--disable-dev-shm-usage",
+                    "--disable-gpu",
+                    "--disable-web-security",
+                    "--disable-features=VizDisplayCompositor",
+                    "--disable-extensions",
+                    "--disable-plugins",
+                    "--disable-images",  # Reduce bandwidth and loading time
+                    "--disable-javascript-harmony-shipping",
+                    "--disable-background-timer-throttling",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-renderer-backgrounding",
+                    "--disable-field-trial-config",
+                    "--disable-back-forward-cache",
+                    "--disable-ipc-flooding-protection",
+                    "--no-first-run",
+                    "--no-default-browser-check",
+                    "--no-pings",
+                    # Removed --single-process as it can cause handshake issues
+                    "--disable-setuid-sandbox",  # Disable setuid sandbox
+                    "--disable-background-networking",  # Disable background networking
+                    "--disable-default-apps",  # Disable default apps
+                    "--disable-translate",  # Disable translate
+                    "--disable-sync",  # Disable sync
+                    "--metrics-recording-only",  # Only record metrics
+                    "--no-report-upload",  # Don't upload reports
+                    "--disable-prompt-on-repost",  # Disable repost prompts
+                    "--disable-domain-reliability",  # Disable domain reliability
+                    "--disable-component-update",  # Disable component updates
+                    "--disable-features=TranslateUI",  # Disable translate UI
+                    "--disable-features=BlinkGenPropertyTrees",  # Disable blink features
+                    "--virtual-time-budget=5000",  # Set virtual time budget
+                    "--remote-debugging-port=0",  # Use dynamic port for debugging
+                    "--disable-logging",  # Reduce logging overhead
+                    "--disable-breakpad",  # Disable crash reporting
+                    "--memory-pressure-off",  # Disable memory pressure signals
+                    # Container-specific optimizations
+                    "--max_old_space_size=1024",  # Limit memory usage
+                    "--disable-crash-reporter",  # Disable crash reporter
+                ]
+                
+                # Add --no-sandbox to browser_args if NO_SANDBOX is true
+                no_sandbox = os.getenv('NO_SANDBOX', 'true').lower() in ('true', '1', 'yes', 'on')
+                if no_sandbox:
+                    browser_args.append("--no-sandbox")
+                
+                # Log browser configuration for debugging
+                logger.info(f"Starting browser with headless={self.headless}, no_sandbox={no_sandbox}")
+                logger.info(f"Browser args: {browser_args}")
+                
+                # Start browser with zendriver with extended timeout
+                # Use asyncio.wait_for to add our own timeout layer
+                startup_timeout = 30 + (attempt * 10)  # Increase timeout with each retry
+                logger.info(f"Browser startup timeout set to {startup_timeout} seconds")
+                
+                self.browser = await asyncio.wait_for(
+                    zd.start(
+                        headless=self.headless,
+                        browser_args=browser_args,
+                        lang="en-US",
+                        no_sandbox=no_sandbox
+                    ),
+                    timeout=startup_timeout
+                )
+                
+                logger.info("Zendriver browser initialized successfully")
+                
+                # Test browser connectivity by creating a simple page
+                try:
+                    test_page = await asyncio.wait_for(
+                        self.browser.get("about:blank"),
+                        timeout=10
+                    )
+                    if test_page:
+                        logger.info("Browser connectivity test passed: about:blank page created successfully")
+                        # Close the test page
+                        await test_page.close()
+                    else:
+                        logger.warning("Browser connectivity test failed: could not create test page")
+                except Exception as e:
+                    logger.warning(f"Browser connectivity test failed: {e}")
+                    # Continue anyway, sometimes this fails but browser still works
+                
+                # Log RAM status after browser setup
+                self._log_ram_status("After Browser Setup")
+                return  # Success, exit retry loop
+                
+            except asyncio.TimeoutError as e:
+                last_error = f"Browser startup timed out after {startup_timeout if 'startup_timeout' in locals() else 30} seconds"
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                
+                # Clean up any partial browser instance
+                if hasattr(self, 'browser') and self.browser:
+                    try:
+                        await self.browser.stop()
+                    except:
+                        pass
+                    self.browser = None
+                
+                if attempt < max_retries - 1:
+                    wait_time = 5 + (attempt * 2)
+                    logger.info(f"Waiting {wait_time} seconds before retry...")
+                    await asyncio.sleep(wait_time)
+                
+            except Exception as e:
+                last_error = str(e)
+                logger.error(f"Attempt {attempt + 1} failed: {last_error}")
+                
+                # Clean up any partial browser instance
+                if hasattr(self, 'browser') and self.browser:
+                    try:
+                        await self.browser.stop()
+                    except:
+                        pass
+                    self.browser = None
+                
+                # Check if this is a handshake or connection error
+                error_str = str(e).lower()
+                if any(term in error_str for term in ['handshake', 'connection', 'timeout']):
+                    if attempt < max_retries - 1:
+                        wait_time = 5 + (attempt * 2)
+                        logger.info(f"Connection error detected, waiting {wait_time} seconds before retry...")
+                        await asyncio.sleep(wait_time)
+                        continue
+                
+                # For other errors, don't retry
+                break
+        
+        # If we get here, all retries failed
+        error_msg = f"Failed to initialize browser after {max_retries} attempts. Last error: {last_error}"
+        logger.error(error_msg)
+        raise Exception(error_msg)
     
     async def close(self):
         """Close the browser"""
@@ -217,6 +314,13 @@ class MovieScraper:
             'browser process died',   # Browser process terminated
             'browser crashed',        # Browser crash
             'chrome has crashed',     # Chrome crash
+            'timed out during opening handshake',  # Handshake timeout
+            'timeout',                # General timeout errors
+            'handshake',             # Handshake failures
+            'websocket',             # WebSocket connection errors
+            'connection timed out',   # Connection timeout
+            'read timeout',          # Read timeout
+            'startup timeout',       # Browser startup timeout
         ]
         
         return any(pattern in error_str for pattern in connection_patterns)
@@ -260,8 +364,24 @@ class MovieScraper:
         try:
             logger.info(f"Navigating to {self.base_url}")
             
-            # Get a new page/tab
-            self.page = await self.browser.get(self.base_url)
+            # Get a new page/tab - try without timeout wrapper first
+            try:
+                logger.info("Creating new page/tab...")
+                self.page = await self.browser.get(self.base_url)
+                logger.info("Successfully created page and navigated to homepage")
+            except StopIteration as e:
+                logger.error(f"StopIteration error while creating page - this may be a zendriver compatibility issue: {e}")
+                logger.error("This suggests the zendriver browser.get() method is not working as expected")
+                return False
+            except Exception as e:
+                logger.error(f"Error creating page: {e}")
+                logger.error(f"Error type: {type(e).__name__}")
+                return False
+            
+            # Verify page was created successfully
+            if not self.page:
+                logger.error("Failed to create page object")
+                return False
             
             # Set window size on the page/tab (not browser)
             if not self.headless:
@@ -273,6 +393,13 @@ class MovieScraper:
             
             # Wait for page to load
             await asyncio.sleep(2)
+            
+            # Verify page loaded by checking URL or title
+            try:
+                current_url = await self.page.evaluate("window.location.href")
+                logger.info(f"Current page URL: {current_url}")
+            except Exception as e:
+                logger.warning(f"Could not get current URL: {e}")
             
             # Check page status after initial navigation
             page_status = await self._check_page_status("Homepage Navigation")
@@ -296,6 +423,7 @@ class MovieScraper:
             
         except Exception as e:
             logger.error(f"Error navigating to homepage: {e}")
+            logger.error(f"Traceback: {traceback.format_exc()}")
             return False
     
     async def _handle_language_switching(self, max_retries: int = 5):
