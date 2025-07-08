@@ -1,0 +1,18 @@
+[Unit]
+Description=Movie Scraper Service
+After=network.target
+
+[Service]
+Type=oneshot
+User=ec2-user
+Group=ec2-user
+WorkingDirectory=/home/ec2-user/sociarch-scraper
+ExecStart=/home/ec2-user/sociarch-scraper/start_scraper.sh
+Environment=HOME=/home/ec2-user
+Environment=USER=ec2-user
+StandardOutput=journal
+StandardError=journal
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target 

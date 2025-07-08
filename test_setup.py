@@ -205,8 +205,8 @@ def main():
     if passed == total:
         print("🎉 All tests passed! Your setup is ready.")
         print("\nYou can now run:")
-        print("  python scraper/main.py        # For one-time scraping")
-        print("  python schedule.py            # For scheduled scraping")
+        print("  python main.py                # Run the movie scraper")
+        print("  ./start_scraper.sh            # Run with EC2-optimized settings")
     else:
         print("⚠️  Some tests failed. Please fix the issues above before running the scraper.")
         sys.exit(1)

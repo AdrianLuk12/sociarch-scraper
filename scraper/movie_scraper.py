@@ -18,13 +18,13 @@ logger = logging.getLogger(__name__)
 class MovieScraper:
     """Movie scraper for hkmovie6.com using Zendriver"""
     
-    def __init__(self, headless: bool = False, delay: float = 2):
+    def __init__(self, headless: bool = True, delay: float = 1):
         """
         Initialize the movie scraper.
         
         Args:
             headless: Whether to run browser in headless mode
-            delay: Delay between requests in seconds
+            delay: Delay between requests in seconds (reduced default)
         """
         self.base_url = "https://hkmovie6.com/"
         self.delay = delay
@@ -32,8 +32,11 @@ class MovieScraper:
         self.browser = None
         self.page = None
         self.db_client = SupabaseClient()
-        # Read timeout from environment (default: 60 seconds)
-        self.scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '60'))
+        # Read timeout from environment (default: 120 seconds for EC2)
+        self.scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '120'))
+        # Track restart attempts
+        self.restart_attempts = 0
+        self.max_restart_attempts = 3
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -45,18 +48,36 @@ class MovieScraper:
         await self.close()
     
     async def _setup_browser(self):
-        """Set up the Zendriver browser with options"""
+        """Set up the Zendriver browser with options optimized for EC2"""
         try:
-            # Chrome options for zendriver - using only supported flags
+            # Chrome options for zendriver - optimized for EC2 and local environments
             browser_args = [
                 "--disable-dev-shm-usage",
                 "--disable-gpu",
-                # "--disable-blink-features=AutomationControlled",
-                # "--no-sandbox"
+                "--disable-extensions",
+                "--disable-plugins",
+                "--disable-images",  # Faster loading
+                "--disable-javascript-harmony-shipping",
+                "--disable-background-timer-throttling",
+                "--disable-background-networking",
+                "--disable-client-side-phishing-detection",
+                "--disable-sync",
+                "--disable-translate",
+                "--hide-scrollbars",
+                "--metrics-recording-only",
+                "--mute-audio",
+                "--no-first-run",
+                "--safebrowsing-disable-auto-update",
+                "--disable-ipc-flooding-protection",
+                "--single-process"  # Better for containers/EC2
             ]
             
-            # Read NO_SANDBOX from environment
-            no_sandbox = os.getenv('NO_SANDBOX', 'false').lower() in ('true', '1', 'yes', 'on')
+            # Read NO_SANDBOX from environment - default to true for EC2
+            no_sandbox = os.getenv('NO_SANDBOX', 'true').lower() in ('true', '1', 'yes', 'on')
+            
+            # Add no-sandbox if running in containerized environment or as root
+            if no_sandbox:
+                browser_args.append("--no-sandbox")
             
             # Start browser with zendriver using correct parameter names
             self.browser = await zd.start(
@@ -66,10 +87,16 @@ class MovieScraper:
                 no_sandbox=no_sandbox
             )
             
-            logger.info("Zendriver browser initialized successfully")
+            logger.info("Zendriver browser initialized successfully with EC2-optimized settings")
             
         except Exception as e:
             logger.error(f"Failed to initialize browser: {e}")
+            # Enhanced error detection for browser initialization
+            if any(pattern in str(e).lower() for pattern in [
+                'timed out', 'connection refused', 'chrome not reachable',
+                'failed to connect', 'handshake', 'stopiteration'
+            ]):
+                logger.error("Browser initialization failed with connection error - this may require system-level fixes")
             raise
     
     async def close(self):
@@ -93,7 +120,7 @@ class MovieScraper:
         """
         error_str = str(error).lower()
         
-        # Common connection error patterns
+        # Common connection error patterns (expanded for better detection)
         connection_patterns = [
             'connect call failed',  # Errno 111
             'connection refused',   # Connection refused
@@ -104,31 +131,115 @@ class MovieScraper:
             'chrome not reachable', # Chrome unreachable
             'no such session',      # Session lost
             'invalid session id',   # Invalid session
+            'stopiteration',        # Coroutine StopIteration
+            'timed out during opening handshake',  # WebSocket handshake timeout
+            'failed to connect to browser',  # Browser connection failure
+            'browser process ended',  # Browser crashed
+            'chrome has crashed',   # Chrome crash
+            'websocket connection closed',  # WebSocket closed
+            'websocket connection failed',  # WebSocket failure
+            'disconnected',         # Generic disconnection
+            'invalid page id',      # Page invalidated
+            'network error',        # Network issues
+            'timeout',              # Generic timeout
         ]
         
         return any(pattern in error_str for pattern in connection_patterns)
     
+    def _is_cloudflare_error(self, error: Exception) -> bool:
+        """
+        Check if the error indicates Cloudflare or similar blocking
+        
+        Args:
+            error: The exception to check
+            
+        Returns:
+            True if this appears to be Cloudflare/blocking
+        """
+        error_str = str(error).lower()
+        
+        cloudflare_patterns = [
+            'cloudflare',
+            'challenge',
+            'captcha',
+            'access denied',
+            'blocked',
+            'rate limit',
+            'too many requests',
+            'suspicious activity',
+            'checking your browser',
+            'ddos protection',
+            'security check'
+        ]
+        
+        return any(pattern in error_str for pattern in cloudflare_patterns)
+    
     async def _restart_browser(self):
-        """Restart the browser after timeout or failure"""
+        """Restart the browser after timeout or failure with retry logic"""
+        self.restart_attempts += 1
+        
+        if self.restart_attempts > self.max_restart_attempts:
+            logger.error(f"Maximum browser restart attempts ({self.max_restart_attempts}) exceeded")
+            raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
+            
         try:
-            logger.warning("Restarting browser due to timeout or failure...")
+            logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
             
-            # Close existing browser
-            await self.close()
+            # Close existing browser - be more aggressive about cleanup
+            try:
+                await self.close()
+            except Exception as close_error:
+                logger.warning(f"Error closing browser during restart: {close_error}")
             
-            # Setup new browser
-            await self._setup_browser()
+            # Reset page reference
+            self.page = None
             
-            # Navigate back to homepage
-            success = await self.navigate_to_homepage()
-            if not success:
+            # Brief wait before restarting (especially important on EC2)
+            await asyncio.sleep(1)
+            
+            # Setup new browser with retry logic
+            setup_attempts = 0
+            max_setup_attempts = 3
+            
+            while setup_attempts < max_setup_attempts:
+                try:
+                    await self._setup_browser()
+                    break
+                except Exception as setup_error:
+                    setup_attempts += 1
+                    logger.warning(f"Browser setup attempt {setup_attempts}/{max_setup_attempts} failed: {setup_error}")
+                    if setup_attempts < max_setup_attempts:
+                        await asyncio.sleep(1)
+                    else:
+                        raise
+            
+            # Navigate back to homepage with retry logic
+            navigation_attempts = 0
+            max_navigation_attempts = 3
+            navigation_success = False
+            
+            while navigation_attempts < max_navigation_attempts and not navigation_success:
+                try:
+                    navigation_attempts += 1
+                    logger.info(f"Attempting to navigate to homepage after restart (attempt {navigation_attempts}/{max_navigation_attempts})")
+                    
+                    navigation_success = await self.navigate_to_homepage()
+                    if navigation_success:
+                        break
+                        
+                except Exception as nav_error:
+                    logger.warning(f"Navigation attempt {navigation_attempts} failed: {nav_error}")
+                    if navigation_attempts < max_navigation_attempts:
+                        await asyncio.sleep(1)
+            
+            if not navigation_success:
                 logger.error("Failed to navigate to homepage after browser restart")
                 raise Exception("Browser restart failed - could not navigate to homepage")
             
-            logger.info("Browser restarted successfully")
+            logger.info(f"Browser restarted successfully (attempt {self.restart_attempts})")
             
         except Exception as e:
-            logger.error(f"Error restarting browser: {e}")
+            logger.error(f"Error restarting browser (attempt {self.restart_attempts}): {e}")
             raise
     
     async def navigate_to_homepage(self) -> bool:
@@ -144,7 +255,7 @@ class MovieScraper:
             # Get a new page/tab
             self.page = await self.browser.get(self.base_url)
             
-            # Set window size on the page/tab (not browser)
+            # Set window size on the page/tab (not browser) only if not headless
             if not self.headless:
                 try:
                     await self.page.set_window_size(width=1920, height=1080)
@@ -152,8 +263,8 @@ class MovieScraper:
                 except Exception as e:
                     logger.warning(f"Could not set window size: {e}")
             
-            # Wait for page to load
-            await asyncio.sleep(2)
+            # Minimal wait for page to load (reduced from 2 seconds)
+            await asyncio.sleep(1)
             
             # Check and handle language switching with retry logic
             language_switched = await self._handle_language_switching()
@@ -209,8 +320,8 @@ class MovieScraper:
                         if click_result:
                             logger.info("Found and clicked language switcher")
                             
-                            # Wait for page to update
-                            await asyncio.sleep(3)
+                            # Reduced wait for page to update (from 3 to 1 second)
+                            await asyncio.sleep(1)
                             
                             # Check if language was updated
                             updated_lang = await self.page.evaluate("document.documentElement.lang")
@@ -226,11 +337,16 @@ class MovieScraper:
                             
                     except Exception as click_error:
                         logger.error(f"Error clicking language switcher on attempt {attempt + 1}: {click_error}")
+                        # Check if this is a Cloudflare error
+                        if self._is_cloudflare_error(click_error):
+                            logger.warning("Detected Cloudflare challenge during language switching")
+                            # Don't wait as long for Cloudflare - it may resolve itself
+                            await asyncio.sleep(1)
                 
-                # If not the last attempt, wait before retrying
+                # If not the last attempt, wait before retrying (reduced wait time)
                 if attempt < max_retries - 1:
-                    logger.info(f"Waiting 2 seconds before retry...")
-                    await asyncio.sleep(2)
+                    logger.info(f"Waiting 1 second before retry...")
+                    await asyncio.sleep(1)
             
             # If we get here, all attempts failed
             final_lang = await self.page.evaluate("document.documentElement.lang")
@@ -265,10 +381,18 @@ class MovieScraper:
             
             if not dropdown_visible:
                 logger.error("Could not find or click the dropdown menu")
+                # Check if this might be due to Cloudflare or missing elements
+                page_content = await self.page.evaluate("document.body.innerHTML")
+                if any(pattern in page_content.lower() for pattern in ['cloudflare', 'challenge', 'checking']):
+                    logger.warning("Page appears to show Cloudflare challenge")
+                    raise Exception("Cloudflare challenge detected - page reload needed")
+                elif 'dropdownWrapper' not in page_content:
+                    logger.warning("Page missing expected dropdown elements")
+                    raise Exception("Missing dropdown elements - page reload needed")
                 return []
             
-            # Wait for dropdown to appear
-            await asyncio.sleep(1)
+            # Minimal wait for dropdown to appear (reduced from 1 second)
+            await asyncio.sleep(0.5)
             
             # Extract movie data from the dropdown
             movies_data = await self.page.evaluate("""
@@ -373,8 +497,8 @@ class MovieScraper:
                     })()
                 """)
                 
-                # Wait a moment for dropdown to close
-                await asyncio.sleep(1)
+                # Minimal wait for dropdown to close (reduced)
+                await asyncio.sleep(0.3)
                 
                 # Find and click the cinema dropdown (look for text content to identify correct one)
                 dropdown_visible = await self.page.evaluate("""
@@ -408,16 +532,25 @@ class MovieScraper:
                 
                 if not dropdown_visible:
                     logger.warning(f"Could not find or click the cinemas dropdown menu (attempt {attempt + 1})")
+                    # Check for page issues that might require reload
+                    try:
+                        page_content = await self.page.evaluate("document.body.innerHTML")
+                        if any(pattern in page_content.lower() for pattern in ['cloudflare', 'challenge', 'checking']):
+                            logger.warning("Cloudflare challenge detected while trying to access cinemas")
+                            raise Exception("Cloudflare challenge detected - page reload needed")
+                    except Exception as content_error:
+                        logger.warning(f"Could not check page content: {content_error}")
+                    
                     if attempt < max_retries - 1:
-                        logger.info(f"Waiting 3 seconds before retry...")
-                        await asyncio.sleep(3)
+                        logger.info(f"Waiting 1 second before retry...")
+                        await asyncio.sleep(1)
                         continue
                     else:
                         logger.error("Failed to click cinema dropdown after all retries")
                         return []
                 
-                # Wait for dropdown to appear and load
-                await asyncio.sleep(3)
+                # Reduced wait for dropdown to appear and load (from 3 to 1 second)
+                await asyncio.sleep(1)
                 
                 # Extract cinema data from all three dropdown groups
                 cinemas_data = await self.page.evaluate("""
@@ -512,8 +645,8 @@ class MovieScraper:
                 else:
                     logger.warning(f"No cinemas found in dropdown (attempt {attempt + 1})")
                     if attempt < max_retries - 1:
-                        logger.info(f"Waiting 3 seconds before retry...")
-                        await asyncio.sleep(3)
+                        logger.info(f"Waiting 1 second before retry...")
+                        await asyncio.sleep(1)
                         continue
                     else:
                         logger.warning("No cinemas found after all retries")
@@ -524,8 +657,8 @@ class MovieScraper:
                 logger.error(f"Error scraping cinemas (attempt {attempt + 1}/{max_retries}): {error_msg}")
                 
                 if attempt < max_retries - 1:
-                    logger.info(f"Waiting 3 seconds before retry...")
-                    await asyncio.sleep(3)
+                    logger.info(f"Waiting 1 second before retry...")
+                    await asyncio.sleep(1)
                 else:
                     logger.error("Failed to scrape cinemas after all retries")
                     return []
@@ -603,8 +736,8 @@ class MovieScraper:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
             try:
                 await self._restart_browser()
-                # Small delay after restart to let browser stabilize
-                await asyncio.sleep(2)
+                # Brief delay after restart to let browser stabilize
+                await asyncio.sleep(1)
                 # Retry once after browser restart
                 logger.info(f"Retrying movie details scraping for: {movie_name}")
                 return await asyncio.wait_for(
@@ -626,8 +759,8 @@ class MovieScraper:
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
                     await self._restart_browser()
-                    # Small delay after restart to let browser stabilize
-                    await asyncio.sleep(2)
+                    # Brief delay after restart to let browser stabilize
+                    await asyncio.sleep(1)
                     # Retry once after browser restart
                     logger.info(f"Retrying movie details scraping after connection error for: {movie_name}")
                     return await asyncio.wait_for(
@@ -664,7 +797,8 @@ class MovieScraper:
         """
         # Navigate to movie page
         await self.page.get(movie_url)
-        await asyncio.sleep(2)
+        # Reduced wait time for page load (from 2 to 0.5 seconds)
+        await asyncio.sleep(0.5)
         
         # Scrape genre/category
         category = await self.page.evaluate("""
@@ -728,8 +862,8 @@ class MovieScraper:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
             try:
                 await self._restart_browser()
-                # Small delay after restart to let browser stabilize
-                await asyncio.sleep(2)
+                # Brief delay after restart to let browser stabilize
+                await asyncio.sleep(1)
                 # Retry once after browser restart
                 logger.info(f"Retrying cinema details scraping for: {cinema_name}")
                 return await asyncio.wait_for(
@@ -750,8 +884,8 @@ class MovieScraper:
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
                     await self._restart_browser()
-                    # Small delay after restart to let browser stabilize
-                    await asyncio.sleep(2)
+                    # Brief delay after restart to let browser stabilize
+                    await asyncio.sleep(1)
                     # Retry once after browser restart
                     logger.info(f"Retrying cinema details scraping after connection error for: {cinema_name}")
                     return await asyncio.wait_for(
@@ -786,7 +920,8 @@ class MovieScraper:
         """
         # Navigate to cinema page
         await self.page.get(cinema_url)
-        await asyncio.sleep(2)
+        # Reduced wait time for page load (from 2 to 0.5 seconds)
+        await asyncio.sleep(0.5)
         
         # Scrape address (excluding the favorite button)
         address = await self.page.evaluate("""
@@ -1153,8 +1288,8 @@ class MovieScraper:
                 # logger.info(f"Saved details for movie: {movie_name}")
                 movies_processed += 1
                 
-                # Small delay between requests to be respectful
-                await asyncio.sleep(1)
+                # Minimal delay between requests (reduced for efficiency)
+                await asyncio.sleep(0.3)
             
             logger.info(f"Movie processing complete:")
             logger.info(f"  - Movies processed: {movies_processed}")
@@ -1237,8 +1372,8 @@ class MovieScraper:
                 
                 cinemas_processed += 1
                 
-                # Small delay between requests to be respectful
-                await asyncio.sleep(1)
+                # Minimal delay between requests (reduced for efficiency)
+                await asyncio.sleep(0.3)
             
             logger.info(f"Cinema processing complete:")
             logger.info(f"  - Cinemas processed: {cinemas_processed}")
@@ -1254,7 +1389,7 @@ class MovieScraper:
 class MovieScraperSync:
     """Synchronous wrapper for the async MovieScraper"""
     
-    def __init__(self, headless: bool = True, delay: float = 2):
+    def __init__(self, headless: bool = True, delay: float = 1):
         self.headless = headless
         self.delay = delay
         self.scraper = None
