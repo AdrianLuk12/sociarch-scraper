@@ -135,10 +135,13 @@ class MovieScraper:
     async def _setup_browser(self):
         """Set up the Zendriver browser with options optimized for EC2"""
         try:
-            # Chrome options for zendriver - optimized for EC2 and local environments
+            # Detect if running on EC2
+            is_ec2 = os.getenv('ENV', '').lower() == 'production' or self._is_ec2_environment()
+            
+            # Base Chrome options for zendriver
             browser_args = [
                 "--disable-dev-shm-usage",
-                "--disable-gpu",
+                "--disable-gpu", 
                 "--disable-extensions",
                 "--disable-plugins",
                 "--disable-images",  # Faster loading
@@ -153,36 +156,90 @@ class MovieScraper:
                 "--mute-audio",
                 "--no-first-run",
                 "--safebrowsing-disable-auto-update",
-                "--disable-ipc-flooding-protection",
-                "--single-process"  # Better for containers/EC2
+                "--disable-ipc-flooding-protection"
             ]
+            
+            # Add EC2-specific flags to prevent hanging
+            if is_ec2:
+                browser_args.extend([
+                    "--single-process",  # Critical for EC2
+                    "--disable-software-rasterizer",
+                    "--disable-background-mode",
+                    "--disable-default-apps",
+                    "--disable-background-networking",
+                    "--disable-features=VizDisplayCompositor",
+                    "--disable-features=TranslateUI",
+                    "--disable-features=BlinkGenPropertyTrees",
+                    "--disable-web-security",  # Sometimes needed on EC2
+                    "--disable-accelerated-2d-canvas",
+                    "--disable-accelerated-jpeg-decoding",
+                    "--disable-accelerated-mjpeg-decode",
+                    "--disable-accelerated-video-decode",
+                    "--memory-pressure-off",
+                    "--max_old_space_size=4096",
+                    "--disable-renderer-backgrounding",
+                    "--disable-backgrounding-occluded-windows",
+                    "--disable-background-mode",
+                    "--disable-features=AudioServiceOutOfProcess",
+                    "--autoplay-policy=user-gesture-required",
+                    "--disable-domain-reliability"
+                ])
+                logger.info("Applied EC2-specific Chrome optimization flags")
             
             # Read NO_SANDBOX from environment - default to true for EC2
             no_sandbox = os.getenv('NO_SANDBOX', 'true').lower() in ('true', '1', 'yes', 'on')
             
-            # Add no-sandbox if running in containerized environment or as root
-            if no_sandbox:
+            # Add no-sandbox if needed
+            if no_sandbox or is_ec2:
                 browser_args.append("--no-sandbox")
             
-            # Start browser with zendriver using correct parameter names
-            self.browser = await zd.start(
-                headless=self.headless,
-                browser_args=browser_args,
-                lang="en-US",
-                no_sandbox=no_sandbox
+            # Start browser with timeout for EC2
+            logger.info("Starting browser with EC2-optimized settings...")
+            
+            # Use asyncio.wait_for to add timeout to browser start
+            timeout_seconds = 60 if is_ec2 else 30
+            
+            self.browser = await asyncio.wait_for(
+                zd.start(
+                    headless=self.headless,
+                    browser_args=browser_args,
+                    lang="en-US",
+                    no_sandbox=no_sandbox or is_ec2
+                ),
+                timeout=timeout_seconds
             )
             
             logger.info("Zendriver browser initialized successfully with EC2-optimized settings")
             
+        except asyncio.TimeoutError:
+            logger.error(f"Browser initialization timed out after {timeout_seconds} seconds")
+            raise Exception(f"Browser startup timeout - this often indicates missing Chrome dependencies on EC2")
         except Exception as e:
             logger.error(f"Failed to initialize browser: {e}")
             # Enhanced error detection for browser initialization
             if any(pattern in str(e).lower() for pattern in [
                 'timed out', 'connection refused', 'chrome not reachable',
-                'failed to connect', 'handshake', 'stopiteration'
+                'failed to connect', 'handshake', 'stopiteration', 'enabling autodiscover'
             ]):
-                logger.error("Browser initialization failed with connection error - this may require system-level fixes")
+                logger.error("Browser initialization failed - this may require EC2 system-level fixes")
+                if self._is_ec2_environment():
+                    logger.error("EC2 troubleshooting steps:")
+                    logger.error("1. Install Chrome: wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add -")
+                    logger.error("2. Add repo: sudo sh -c 'echo \"deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main\" >> /etc/apt/sources.list.d/google.list'")
+                    logger.error("3. Install: sudo apt update && sudo apt install -y google-chrome-stable")
+                    logger.error("4. Install X11: sudo apt install -y xvfb")
             raise
+    
+    def _is_ec2_environment(self) -> bool:
+        """Check if running on EC2 by checking username"""
+        try:
+            import os
+            import getpass
+            username = getpass.getuser()
+            # EC2 instances typically use ec2-user (Amazon Linux) or ubuntu (Ubuntu)
+            return username in ['ec2-user', 'ubuntu']
+        except:
+            return False
     
     async def close(self):
         """Close the browser"""
