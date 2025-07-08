@@ -433,50 +433,84 @@ class MovieScraper:
         """
         try:
             for attempt in range(max_retries):
-                # Get the current language
-                lang_attr = await self.page.evaluate("document.documentElement.lang")
-                logger.info(f"Language check (attempt {attempt + 1}/{max_retries}): {lang_attr}")
-                
-                # Check if already in English
-                if lang_attr and lang_attr.startswith("en"):
-                    logger.info(f"Page is in English ({lang_attr}), proceeding...")
-                    return True
+                # Get the current language with timeout
+                try:
+                    is_ec2 = self._is_ec2_environment()
+                    timeout_seconds = 10 if is_ec2 else 5
+                    
+                    lang_attr = await asyncio.wait_for(
+                        self.page.evaluate("document.documentElement.lang"),
+                        timeout=timeout_seconds
+                    )
+                    logger.info(f"Language check (attempt {attempt + 1}/{max_retries}): {lang_attr}")
+                    
+                    # Check if already in English
+                    if lang_attr and lang_attr.startswith("en"):
+                        logger.info(f"Page is in English ({lang_attr}), proceeding...")
+                        return True
+                        
+                except asyncio.TimeoutError:
+                    logger.warning(f"Language check timed out after {timeout_seconds} seconds on attempt {attempt + 1}")
+                    lang_attr = None
+                except Exception as eval_error:
+                    logger.warning(f"Error checking initial language on attempt {attempt + 1}: {eval_error}")
+                    lang_attr = None
                 
                 # If not English, try to switch
                 if lang_attr == "zh-HK" or not lang_attr or not lang_attr.startswith("en"):
                     logger.info(f"Page language is '{lang_attr}', attempting to switch to English (attempt {attempt + 1}/{max_retries})")
                     
                     try:
-                        # Use evaluate to find and click the language switcher
-                        click_result = await self.page.evaluate("""
-                            (() => {
-                                const langWrapper = document.querySelector('div.lang-wrapper.clickable');
-                                if (langWrapper) {
-                                    langWrapper.click();
-                                    return true;
-                                }
-                                return false;
-                            })()
-                        """)
+                        # Use evaluate to find and click the language switcher with timeout
+                        is_ec2 = self._is_ec2_environment()
+                        timeout_seconds = 10 if is_ec2 else 5
+                        
+                        click_result = await asyncio.wait_for(
+                            self.page.evaluate("""
+                                (() => {
+                                    const langWrapper = document.querySelector('div.lang-wrapper.clickable');
+                                    if (langWrapper) {
+                                        langWrapper.click();
+                                        return true;
+                                    }
+                                    return false;
+                                })()
+                            """),
+                            timeout=timeout_seconds
+                        )
                         
                         if click_result:
                             logger.info("Found and clicked language switcher")
                             
-                            # Reduced wait for page to update (from 3 to 1 second)
-                            await asyncio.sleep(1)
+                            # EC2-aware wait time for page to update
+                            is_ec2 = self._is_ec2_environment()
+                            wait_time = 3 if is_ec2 else 1
+                            logger.info(f"Waiting {wait_time} seconds for page update...")
+                            await asyncio.sleep(wait_time)
                             
-                            # Check if language was updated
-                            updated_lang = await self.page.evaluate("document.documentElement.lang")
-                            logger.info(f"Language after clicking: {updated_lang}")
-                            
-                            if updated_lang and updated_lang.startswith("en"):
-                                logger.info("Successfully switched to English")
-                                return True
-                            else:
-                                logger.warning(f"Language switch attempt {attempt + 1} failed, still showing: {updated_lang}")
+                            # Check if language was updated with timeout
+                            try:
+                                timeout_seconds = 10 if is_ec2 else 5
+                                updated_lang = await asyncio.wait_for(
+                                    self.page.evaluate("document.documentElement.lang"),
+                                    timeout=timeout_seconds
+                                )
+                                logger.info(f"Language after clicking: {updated_lang}")
+                                
+                                if updated_lang and updated_lang.startswith("en"):
+                                    logger.info("Successfully switched to English")
+                                    return True
+                                else:
+                                    logger.warning(f"Language switch attempt {attempt + 1} failed, still showing: {updated_lang}")
+                            except asyncio.TimeoutError:
+                                logger.warning(f"Language check timed out after {timeout_seconds} seconds on attempt {attempt + 1}")
+                            except Exception as eval_error:
+                                logger.warning(f"Error checking language on attempt {attempt + 1}: {eval_error}")
                         else:
                             logger.warning(f"Could not find language switcher element on attempt {attempt + 1}")
                             
+                    except asyncio.TimeoutError:
+                        logger.warning(f"Language switcher click timed out after {timeout_seconds} seconds on attempt {attempt + 1}")
                     except Exception as click_error:
                         logger.error(f"Error clicking language switcher on attempt {attempt + 1}: {click_error}")
                         # Check if this is a Cloudflare error
@@ -485,14 +519,24 @@ class MovieScraper:
                             # Don't wait as long for Cloudflare - it may resolve itself
                             await asyncio.sleep(1)
                 
-                # If not the last attempt, wait before retrying (reduced wait time)
+                # If not the last attempt, wait before retrying with EC2-aware timing
                 if attempt < max_retries - 1:
-                    logger.info(f"Waiting 1 second before retry...")
-                    await asyncio.sleep(1)
+                    is_ec2 = self._is_ec2_environment()
+                    retry_delay = 2 if is_ec2 else 1
+                    logger.info(f"Waiting {retry_delay} seconds before retry...")
+                    await asyncio.sleep(retry_delay)
             
             # If we get here, all attempts failed
-            final_lang = await self.page.evaluate("document.documentElement.lang")
-            logger.error(f"Failed to switch language to English after {max_retries} attempts. Final language: {final_lang}")
+            try:
+                is_ec2 = self._is_ec2_environment()
+                timeout_seconds = 10 if is_ec2 else 5
+                final_lang = await asyncio.wait_for(
+                    self.page.evaluate("document.documentElement.lang"),
+                    timeout=timeout_seconds
+                )
+                logger.error(f"Failed to switch language to English after {max_retries} attempts. Final language: {final_lang}")
+            except Exception as final_check_error:
+                logger.error(f"Failed to switch language to English after {max_retries} attempts. Could not check final language: {final_check_error}")
             return False
                 
         except Exception as e:
