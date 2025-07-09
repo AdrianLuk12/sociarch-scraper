@@ -176,7 +176,7 @@ class MovieScraper:
             
             self.browser = await asyncio.wait_for(
                 zd.start(
-                    headless=self.headless,
+                    headless=False,
                     browser_args=browser_args,
                     lang="en-US",
                     no_sandbox=no_sandbox or is_ec2
