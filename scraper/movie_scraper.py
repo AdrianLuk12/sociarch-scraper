@@ -940,8 +940,7 @@ class MovieScraper:
             )
             
         except asyncio.TimeoutError:
-            logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}")
-            logger.warning("Timeout detected - performing full browser restart...")
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
             try:
                 # Reset restart attempts for retry
                 self.restart_attempts = 0
@@ -949,24 +948,24 @@ class MovieScraper:
                 # Brief delay after restart to let browser stabilize
                 await asyncio.sleep(1)
                 # Retry once after browser restart
-                logger.info(f"Retrying movie details scraping after timeout restart for: {movie_name}")
+                logger.info(f"Retrying movie details scraping for: {movie_name}")
                 return await asyncio.wait_for(
                     self._scrape_movie_details_internal(movie_name, movie_url),
                     timeout=self.scraper_timeout
                 )
             except Exception as restart_error:
-                logger.error(f"Failed to restart browser after timeout for movie {movie_name}: {restart_error}")
+                logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
                 return {
                     'name': movie_name,
                     'url': movie_url,
                     'category': 'Timeout Error',
-                    'description': 'Browser restart failed after timeout'
+                    'description': 'Timeout error - browser restart failed'
                 }
         except Exception as e:
-            # Check if this is a browser restart request or connection error
-            if "browser restart needed" in str(e).lower() or self._is_connection_error(e):
-                logger.error(f"Browser restart required for movie {movie_name}: {e}")
-                logger.warning("Restarting browser and retrying...")
+            # Check if this is a connection error that requires browser restart
+            if self._is_connection_error(e):
+                logger.error(f"Connection error scraping movie details for {movie_name}: {e}")
+                logger.warning("Detected connection failure, restarting browser...")
                 try:
                     # Reset restart attempts for retry
                     self.restart_attempts = 0
@@ -974,7 +973,7 @@ class MovieScraper:
                     # Brief delay after restart to let browser stabilize
                     await asyncio.sleep(1)
                     # Retry once after browser restart
-                    logger.info(f"Retrying movie details scraping after browser restart for: {movie_name}")
+                    logger.info(f"Retrying movie details scraping after connection error for: {movie_name}")
                     return await asyncio.wait_for(
                         self._scrape_movie_details_internal(movie_name, movie_url),
                         timeout=self.scraper_timeout
@@ -984,11 +983,11 @@ class MovieScraper:
                     return {
                         'name': movie_name,
                         'url': movie_url,
-                        'category': 'Browser Restart Error',
-                        'description': 'Browser restart failed after critical error'
+                        'category': 'Connection Error',
+                        'description': 'Connection error - browser restart failed'
                     }
             else:
-                logger.error(f"Non-critical error scraping details for movie {movie_name}: {e}")
+                logger.error(f"Error scraping details for movie {movie_name}: {e}")
                 return {
                     'name': movie_name,
                     'url': movie_url,
@@ -1007,92 +1006,48 @@ class MovieScraper:
         Returns:
             Dictionary with movie details
         """
-        try:
-            # Navigate to movie page with timeout
-            logger.info(f"Navigating to movie URL: {movie_url}")
-            is_ec2 = self._is_ec2_environment()
-            navigation_timeout = 30 if is_ec2 else 20
-            
-            await asyncio.wait_for(
-                self.page.get(movie_url),
-                timeout=navigation_timeout
-            )
-            logger.info(f"Successfully navigated to movie page for: {movie_name}")
-            
-            # Wait for page to load
-            await asyncio.sleep(3)
-            
-            # Scrape genre/category with timeout
-            logger.info(f"Scraping category for: {movie_name}")
-            eval_timeout = 15 if is_ec2 else 10
-            
-            category = await asyncio.wait_for(
-                self.page.evaluate("""
-                    (() => {
-                        const sectionContainer = document.querySelector('div.flex.flex-row.flex-wrap.sectionContainer.items-center');
-                        if (sectionContainer) {
-                            // Check if there's an h2 element at the same level that says "Genres"
-                            const h2Element = sectionContainer.querySelector('h2');
-                            if (h2Element && h2Element.textContent.trim().toLowerCase() === 'genres') {
-                                const h3Element = sectionContainer.querySelector('h3');
-                                return h3Element ? h3Element.textContent.trim() : '';
-                            }
-                        }
-                        return 'Unknown';
-                    })()
-                """),
-                timeout=eval_timeout
-            )
-            logger.info(f"Successfully scraped category for {movie_name}: {category}")
-            
-            # Scrape description with timeout
-            logger.info(f"Scraping description for: {movie_name}")
-            description = await asyncio.wait_for(
-                self.page.evaluate("""
-                    (() => {
-                        const synopsisContainer = document.querySelector('div.synopsis.desktop-only');
-                        if (synopsisContainer) {
-                            const firstDiv = synopsisContainer.querySelector('div');
-                            return firstDiv ? firstDiv.textContent.trim() : '';
-                        }
-                        return '';
-                    })()
-                """),
-                timeout=eval_timeout
-            )
-            logger.info(f"Successfully scraped description for {movie_name}: {len(description)} characters")
-            
-            # Sanitize the description
-            sanitized_description = self._sanitize_csv_text(description)
-            
-            return {
-                'name': movie_name,
-                'url': movie_url,
-                'category': category or 'Unknown',
-                'description': description or 'No description available'
-            }
-            
-        except asyncio.TimeoutError as timeout_error:
-            logger.error(f"Timeout during movie details scraping for {movie_name}: {timeout_error}")
-            logger.warning("Timeout detected - triggering browser restart")
-            raise Exception(f"Browser restart needed due to timeout: {timeout_error}")
-        except Exception as e:
-            logger.error(f"Error in _scrape_movie_details_internal for {movie_name}: {e}")
-            # Check if this is a critical error that requires browser restart
-            if self._is_connection_error(e) or any(pattern in str(e).lower() for pattern in [
-                'target closed', 'invalid session', 'chrome not reachable', 'disconnected',
-                'websocket', 'browser', 'navigation'
-            ]):
-                logger.warning("Critical error detected - triggering browser restart")
-                raise Exception(f"Browser restart needed due to error: {e}")
-            else:
-                # For non-critical errors, return error data
-                return {
-                    'name': movie_name,
-                    'url': movie_url,
-                    'category': 'Error',
-                    'description': 'Error during scraping process'
+        # Navigate to movie page
+        await self.page.get(movie_url)
+        # Reduced wait time for page load (from 2 to 0.5 seconds)
+        await asyncio.sleep(3)
+        
+        # Scrape genre/category
+        category = await self.page.evaluate("""
+            (() => {
+                const sectionContainer = document.querySelector('div.flex.flex-row.flex-wrap.sectionContainer.items-center');
+                if (sectionContainer) {
+                    // Check if there's an h2 element at the same level that says "Genres"
+                    const h2Element = sectionContainer.querySelector('h2');
+                    if (h2Element && h2Element.textContent.trim().toLowerCase() === 'genres') {
+                        const h3Element = sectionContainer.querySelector('h3');
+                        return h3Element ? h3Element.textContent.trim() : '';
+                    }
                 }
+                return 'Unknown';
+            })()
+        """)
+        
+        # Scrape description
+        description = await self.page.evaluate("""
+            (() => {
+                const synopsisContainer = document.querySelector('div.synopsis.desktop-only');
+                if (synopsisContainer) {
+                    const firstDiv = synopsisContainer.querySelector('div');
+                    return firstDiv ? firstDiv.textContent.trim() : '';
+                }
+                return '';
+            })()
+        """)
+        
+        # Sanitize the description
+        sanitized_description = self._sanitize_csv_text(description)
+        
+        return {
+            'name': movie_name,
+            'url': movie_url,
+            'category': category or 'Unknown',
+            'description': description or 'No description available'
+        }
 
     async def scrape_cinema_details(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
         """
@@ -1124,8 +1079,7 @@ class MovieScraper:
             )
             
         except asyncio.TimeoutError:
-            logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}")
-            logger.warning("Timeout detected - performing full browser restart...")
+            logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
             try:
                 # Reset restart attempts for retry
                 self.restart_attempts = 0
@@ -1133,23 +1087,23 @@ class MovieScraper:
                 # Brief delay after restart to let browser stabilize
                 await asyncio.sleep(1)
                 # Retry once after browser restart
-                logger.info(f"Retrying cinema details scraping after timeout restart for: {cinema_name}")
+                logger.info(f"Retrying cinema details scraping for: {cinema_name}")
                 return await asyncio.wait_for(
                     self._scrape_cinema_details_internal(cinema_name, cinema_url),
                     timeout=self.scraper_timeout
                 )
             except Exception as restart_error:
-                logger.error(f"Failed to restart browser after timeout for cinema {cinema_name}: {restart_error}")
+                logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
                 return {
                     'name': cinema_name,
                     'url': cinema_url,
-                    'address': 'Browser restart failed after timeout'
+                    'address': 'Timeout error - browser restart failed'
                 }
         except Exception as e:
-            # Check if this is a browser restart request or connection error
-            if "browser restart needed" in str(e).lower() or self._is_connection_error(e):
-                logger.error(f"Browser restart required for cinema {cinema_name}: {e}")
-                logger.warning("Restarting browser and retrying...")
+            # Check if this is a connection error that requires browser restart
+            if self._is_connection_error(e):
+                logger.error(f"Connection error scraping cinema details for {cinema_name}: {e}")
+                logger.warning("Detected connection failure, restarting browser...")
                 try:
                     # Reset restart attempts for retry
                     self.restart_attempts = 0
@@ -1157,7 +1111,7 @@ class MovieScraper:
                     # Brief delay after restart to let browser stabilize
                     await asyncio.sleep(1)
                     # Retry once after browser restart
-                    logger.info(f"Retrying cinema details scraping after browser restart for: {cinema_name}")
+                    logger.info(f"Retrying cinema details scraping after connection error for: {cinema_name}")
                     return await asyncio.wait_for(
                         self._scrape_cinema_details_internal(cinema_name, cinema_url),
                         timeout=self.scraper_timeout
@@ -1167,10 +1121,10 @@ class MovieScraper:
                     return {
                         'name': cinema_name,
                         'url': cinema_url,
-                        'address': 'Browser restart failed after critical error'
+                        'address': 'Connection error - browser restart failed'
                     }
             else:
-                logger.error(f"Non-critical error scraping details for cinema {cinema_name}: {e}")
+                logger.error(f"Error scraping details for cinema {cinema_name}: {e}")
                 return {
                     'name': cinema_name,
                     'url': cinema_url,
@@ -1188,70 +1142,35 @@ class MovieScraper:
         Returns:
             Dictionary with cinema details
         """
-        try:
-            # Navigate to cinema page with timeout
-            logger.info(f"Navigating to cinema URL: {cinema_url}")
-            is_ec2 = self._is_ec2_environment()
-            navigation_timeout = 30 if is_ec2 else 20
-            
-            await asyncio.wait_for(
-                self.page.get(cinema_url),
-                timeout=navigation_timeout
-            )
-            logger.info(f"Successfully navigated to cinema page for: {cinema_name}")
-            
-            # Wait for page to load
-            await asyncio.sleep(0.5)
-            
-            # Scrape address (excluding the favorite button) with timeout
-            logger.info(f"Scraping address for: {cinema_name}")
-            eval_timeout = 15 if is_ec2 else 10
-            
-            address = await asyncio.wait_for(
-                self.page.evaluate("""
-                    (() => {
-                        const addressElements = document.querySelectorAll('div.sub.f.ai-center');
-                        if (addressElements.length > 0) {
-                            const addressDiv = addressElements[0];
-                            
-                            // Clone the element to avoid modifying the original
-                            const clonedDiv = addressDiv.cloneNode(true);
-                            
-                            // Remove any button elements (like the favorite button)
-                            const buttons = clonedDiv.querySelectorAll('button');
-                            buttons.forEach(button => button.remove());
-                            
-                            // Remove any img elements (location icon)
-                            const images = clonedDiv.querySelectorAll('img');
-                            images.forEach(img => img.remove());
-                            
-                            // Get the clean text content
-                            return clonedDiv.textContent.trim();
-                        }
-                        return '';
-                    })()
-                """),
-                timeout=eval_timeout
-            )
-            logger.info(f"Successfully scraped address for {cinema_name}: {address}")
-            
-        except asyncio.TimeoutError as timeout_error:
-            logger.error(f"Timeout during cinema details scraping for {cinema_name}: {timeout_error}")
-            logger.warning("Timeout detected - triggering browser restart")
-            raise Exception(f"Browser restart needed due to timeout: {timeout_error}")
-        except Exception as e:
-            logger.error(f"Error during cinema page navigation/scraping for {cinema_name}: {e}")
-            # Check if this is a critical error that requires browser restart
-            if self._is_connection_error(e) or any(pattern in str(e).lower() for pattern in [
-                'target closed', 'invalid session', 'chrome not reachable', 'disconnected',
-                'websocket', 'browser', 'navigation'
-            ]):
-                logger.warning("Critical error detected - triggering browser restart")
-                raise Exception(f"Browser restart needed due to error: {e}")
-            else:
-                # For non-critical errors, set error message and continue
-                logger.warning(f"Non-critical error, continuing with error message: {e}")
-                address = 'Error during scraping process'
+        # Navigate to cinema page
+        await self.page.get(cinema_url)
+        # Reduced wait time for page load (from 2 to 0.5 seconds)
+        await asyncio.sleep(0.5)
+        
+        # Scrape address (excluding the favorite button)
+        address = await self.page.evaluate("""
+            (() => {
+                const addressElements = document.querySelectorAll('div.sub.f.ai-center');
+                if (addressElements.length > 0) {
+                    const addressDiv = addressElements[0];
+                    
+                    // Clone the element to avoid modifying the original
+                    const clonedDiv = addressDiv.cloneNode(true);
+                    
+                    // Remove any button elements (like the favorite button)
+                    const buttons = clonedDiv.querySelectorAll('button');
+                    buttons.forEach(button => button.remove());
+                    
+                    // Remove any img elements (location icon)
+                    const images = clonedDiv.querySelectorAll('img');
+                    images.forEach(img => img.remove());
+                    
+                    // Get the clean text content
+                    return clonedDiv.textContent.trim();
+                }
+                return '';
+            })()
+        """)
         
         # Sanitize the address
         sanitized_address = self._sanitize_csv_text(address)
