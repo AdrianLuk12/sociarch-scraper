@@ -6,7 +6,6 @@ import logging
 import time
 import asyncio
 import csv
-import threading
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, date
 import zendriver as zd
@@ -42,11 +41,6 @@ class MovieScraper:
         # Track restart attempts
         self.restart_attempts = 0
         self.max_restart_attempts = 3
-        # Watchdog variables for activity monitoring
-        self.last_activity_time = time.time()
-        self.watchdog_running = False
-        self.watchdog_task = None
-        self.activity_lock = threading.Lock()
     
     async def __aenter__(self):
         """Async context manager entry"""
@@ -59,66 +53,7 @@ class MovieScraper:
     
     async def cleanup(self):
         """Cleanup method for proper resource management"""
-        await self._stop_watchdog()
         await self.close()
-    
-    def _update_activity(self):
-        """Update the last activity timestamp - called whenever there's log activity"""
-        with self.activity_lock:
-            self.last_activity_time = time.time()
-    
-    async def _start_watchdog(self):
-        """Start the watchdog task to monitor for inactivity"""
-        if not self.watchdog_running:
-            self.watchdog_running = True
-            self.watchdog_task = asyncio.create_task(self._watchdog_monitor())
-            logger.info(f"Started activity watchdog with {self.scraper_timeout}s timeout")
-    
-    async def _stop_watchdog(self):
-        """Stop the watchdog task"""
-        if self.watchdog_running:
-            self.watchdog_running = False
-            if self.watchdog_task:
-                self.watchdog_task.cancel()
-                try:
-                    await self.watchdog_task
-                except asyncio.CancelledError:
-                    pass
-            logger.info("Stopped activity watchdog")
-    
-    async def _watchdog_monitor(self):
-        """Monitor for activity and restart browser if no activity for SCRAPER_TIMEOUT"""
-        try:
-            while self.watchdog_running:
-                await asyncio.sleep(10)  # Check every 10 seconds
-                
-                with self.activity_lock:
-                    time_since_activity = time.time() - self.last_activity_time
-                
-                if time_since_activity > 20:
-                    logger.warning(f"No activity detected for {time_since_activity:.1f} seconds (timeout: {self.scraper_timeout}s)")
-                    logger.warning("Watchdog triggered - restarting browser due to inactivity")
-                    
-                    try:
-                        # Reset restart attempts for watchdog restart
-                        self.restart_attempts = 0
-                        await self._restart_browser()
-                        logger.info("Watchdog successfully restarted browser")
-                        
-                        # Reset activity time after restart
-                        with self.activity_lock:
-                            self.last_activity_time = time.time()
-                            
-                    except Exception as e:
-                        logger.error(f"Watchdog failed to restart browser: {e}")
-                        # Continue monitoring even if restart fails
-                        with self.activity_lock:
-                            self.last_activity_time = time.time()
-                        
-        except asyncio.CancelledError:
-            logger.info("Watchdog monitor task cancelled")
-        except Exception as e:
-            logger.error(f"Error in watchdog monitor: {e}")
     
     async def scrape_all_data(self) -> bool:
         """
@@ -130,75 +65,48 @@ class MovieScraper:
         """
         try:
             logger.info("Starting comprehensive data scraping...")
-            self._update_activity()
-            
-            # Print environment variables for debugging
-            logger.info("=== Environment Variables ===")
-            logger.info(f"SCRAPER_DELAY: {os.getenv('SCRAPER_DELAY', 'not set (default: 1)')}")
-            logger.info(f"SCRAPER_TIMEOUT: {os.getenv('SCRAPER_TIMEOUT', 'not set (default: 120)')}")
-            logger.info(f"HEADLESS_MODE: {os.getenv('HEADLESS_MODE', 'not set (default: True)')}")
-            logger.info(f"NO_SANDBOX: {os.getenv('NO_SANDBOX', 'not set (default: true)')}")
-            logger.info("=============================")
-            
-            # Start watchdog to monitor for inactivity
-            await self._start_watchdog()
             
             # Setup browser if not already done
             if not self.browser:
                 await self._setup_browser()
-            self._update_activity()
             
             # Navigate to homepage
             if not await self.navigate_to_homepage():
                 logger.error("Failed to navigate to homepage")
-                await self._stop_watchdog()
                 return False
-            self._update_activity()
             
             # Scrape movies
             logger.info("Scraping movie listings...")
-            self._update_activity()
             movies = await self.scrape_movie_showings()
             if not movies:
                 logger.warning("No movies found")
-                await self._stop_watchdog()
                 return False
             
             logger.info(f"Found {len(movies)} movies")
-            self._update_activity()
             await self.save_movies_to_csv(movies, "movies.csv")
             
             # Scrape cinemas
             logger.info("Scraping cinema listings...")
-            self._update_activity()
             cinemas = await self.scrape_cinemas()
             if not cinemas:
                 logger.warning("No cinemas found")
-                await self._stop_watchdog()
                 return False
             
             logger.info(f"Found {len(cinemas)} cinemas")
-            self._update_activity()
             await self.save_cinemas_to_csv(cinemas, "cinemas.csv")
             
             # Scrape detailed information
             logger.info("Scraping detailed movie information...")
-            self._update_activity()
             await self.scrape_all_movie_details("movies.csv", "movies_details.csv")
             
             logger.info("Scraping detailed cinema information and showtimes...")
-            self._update_activity()
             await self.scrape_all_cinema_details("cinemas.csv", "cinemas_details.csv")
             
             logger.info("All data scraping completed successfully")
-            self._update_activity()
-            await self._stop_watchdog()
             return True
             
         except Exception as e:
             logger.error(f"Error in scrape_all_data: {e}")
-            self._update_activity()
-            await self._stop_watchdog()
             return False
     
     def _detect_cloudflare_challenge(self, page_content: str) -> bool:
@@ -393,7 +301,6 @@ class MovieScraper:
             
         try:
             logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
-            self._update_activity()
             
             # Close existing browser - be more aggressive about cleanup
             try:
@@ -447,11 +354,9 @@ class MovieScraper:
                 raise Exception("Browser restart failed - could not navigate to homepage")
             
             logger.info(f"Browser restarted successfully (attempt {self.restart_attempts})")
-            self._update_activity()
             
         except Exception as e:
             logger.error(f"Error restarting browser (attempt {self.restart_attempts}): {e}")
-            self._update_activity()
             raise
     
     async def navigate_to_homepage(self) -> bool:
@@ -463,7 +368,6 @@ class MovieScraper:
         """
         try:
             logger.info(f"Navigating to {self.base_url}")
-            self._update_activity()
             
             # Get a new page/tab
             self.page = await self.browser.get(self.base_url)
@@ -1021,11 +925,9 @@ class MovieScraper:
             # Reset restart attempts for this URL
             self.restart_attempts = 0
             logger.info(f"Scraping details for movie: {movie_name} (timeout: {self.scraper_timeout}s)")
-            self._update_activity()
             
             # Step 1: Restart browser entirely before scraping (includes homepage navigation)
             logger.info(f"Restarting browser before scraping movie: {movie_name}")
-            self._update_activity()
             await self._restart_browser()
             
             # Step 2: Navigate to movie URL and scrape (language switching already done in _restart_browser)
@@ -1039,7 +941,6 @@ class MovieScraper:
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
-            self._update_activity()
             try:
                 # Reset restart attempts for retry
                 self.restart_attempts = 0
@@ -1048,14 +949,12 @@ class MovieScraper:
                 await asyncio.sleep(1)
                 # Retry once after browser restart
                 logger.info(f"Retrying movie details scraping for: {movie_name}")
-                self._update_activity()
                 return await asyncio.wait_for(
                     self._scrape_movie_details_internal(movie_name, movie_url),
                     timeout=self.scraper_timeout
                 )
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for movie {movie_name}: {restart_error}")
-                self._update_activity()
                 return {
                     'name': movie_name,
                     'url': movie_url,
@@ -1165,11 +1064,9 @@ class MovieScraper:
             # Reset restart attempts for this URL
             self.restart_attempts = 0
             logger.info(f"Scraping details for cinema: {cinema_name} (timeout: {self.scraper_timeout}s)")
-            self._update_activity()
             
             # Step 1: Restart browser entirely before scraping (includes homepage navigation)
             logger.info(f"Restarting browser before scraping cinema: {cinema_name}")
-            self._update_activity()
             await self._restart_browser()
             
             # Step 2: Navigate to cinema URL and scrape (language switching already done in _restart_browser)
@@ -1183,7 +1080,6 @@ class MovieScraper:
             
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
-            self._update_activity()
             try:
                 # Reset restart attempts for retry
                 self.restart_attempts = 0
@@ -1192,14 +1088,12 @@ class MovieScraper:
                 await asyncio.sleep(1)
                 # Retry once after browser restart
                 logger.info(f"Retrying cinema details scraping for: {cinema_name}")
-                self._update_activity()
                 return await asyncio.wait_for(
                     self._scrape_cinema_details_internal(cinema_name, cinema_url),
                     timeout=self.scraper_timeout
                 )
             except Exception as restart_error:
                 logger.error(f"Failed to restart browser or retry scraping for cinema {cinema_name}: {restart_error}")
-                self._update_activity()
                 return {
                     'name': cinema_name,
                     'url': cinema_url,
