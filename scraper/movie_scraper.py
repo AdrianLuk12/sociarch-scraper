@@ -95,7 +95,7 @@ class MovieScraper:
                 with self.activity_lock:
                     time_since_activity = time.time() - self.last_activity_time
                 
-                if time_since_activity > self.scraper_timeout:
+                if time_since_activity > 20:
                     logger.warning(f"No activity detected for {time_since_activity:.1f} seconds (timeout: {self.scraper_timeout}s)")
                     logger.warning("Watchdog triggered - restarting browser due to inactivity")
                     

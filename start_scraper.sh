@@ -56,15 +56,18 @@ export ENV=production
 export RUN_ONCE=true
 
 # Start virtual display for Chrome (if not running headless and X not available)
-if [ "$IS_EC2" = "true" ] && ! pgrep Xvfb > /dev/null 2>&1; then
-    echo "[INFO] Starting virtual display for EC2..."
-    if command_exists Xvfb; then
-        Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
-        sleep 2
-    else
-        echo "[WARN] Xvfb not found, relying on headless mode"
-    fi
-fi
+# if [ "$IS_EC2" = "true" ] && ! pgrep Xvfb > /dev/null 2>&1; then
+#     echo "[INFO] Starting virtual display for EC2..."
+#     if command_exists Xvfb; then
+#         Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+#         sleep 2
+#     else
+#         echo "[WARN] Xvfb not found, relying on headless mode"
+#     fi
+# fi
+
+Xvfb :99 -screen 0 1920x1080x24 > /dev/null 2>&1 &
+sleep 2
 
 # Navigate to project directory
 if [ -d "/home/ubuntu/sociarch-scraper" ]; then
