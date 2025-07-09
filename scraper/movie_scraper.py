@@ -179,7 +179,7 @@ class MovieScraper:
                     headless=False,
                     browser_args=browser_args,
                     lang="en-US",
-                    no_sandbox=no_sandbox or is_ec2
+                    no_sandbox=True
                 ),
                 timeout=timeout_seconds
             )
