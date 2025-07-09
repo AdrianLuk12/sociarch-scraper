@@ -434,6 +434,43 @@ class MovieScraper:
                     logger.warning(f"Error checking initial language on attempt {attempt + 1}: {eval_error}")
                     lang_attr = None
                 
+                # If language is None, reload the page first
+                if lang_attr is None:
+                    logger.warning(f"Page language is 'None', reloading page (attempt {attempt + 1}/{max_retries})")
+                    try:
+                        await self.page.reload()
+                        
+                        # Wait for page to reload
+                        is_ec2 = self._is_ec2_environment()
+                        reload_wait = 3 if is_ec2 else 2
+                        logger.info(f"Waiting {reload_wait} seconds for page reload...")
+                        await asyncio.sleep(reload_wait)
+                        
+                        # Check language again after reload
+                        try:
+                            timeout_seconds = 10 if is_ec2 else 5
+                            reloaded_lang = await asyncio.wait_for(
+                                self.page.evaluate("document.documentElement.lang"),
+                                timeout=timeout_seconds
+                            )
+                            logger.info(f"Language after page reload: {reloaded_lang}")
+                            
+                            # If now in English, return success
+                            if reloaded_lang and reloaded_lang.startswith("en"):
+                                logger.info("Page is in English after reload, proceeding...")
+                                return True
+                            
+                            # Update lang_attr for further processing
+                            lang_attr = reloaded_lang
+                            
+                        except Exception as reload_check_error:
+                            logger.warning(f"Error checking language after reload: {reload_check_error}")
+                            lang_attr = None
+                            
+                    except Exception as reload_error:
+                        logger.error(f"Error reloading page: {reload_error}")
+                        lang_attr = None
+                
                 # If not English, try to switch
                 if lang_attr == "zh-HK" or not lang_attr or not lang_attr.startswith("en"):
                     logger.info(f"Page language is '{lang_attr}', attempting to switch to English (attempt {attempt + 1}/{max_retries})")
