@@ -1052,7 +1052,7 @@ class MovieScraper:
             'name': movie_name,
             'url': movie_url,
             'category': category or 'Unknown',
-            'description': sanitized_description or 'No description available'
+            'description': description or 'No description available'
         }
 
     async def scrape_cinema_details(self, cinema_name: str, cinema_url: str) -> Dict[str, str]:
