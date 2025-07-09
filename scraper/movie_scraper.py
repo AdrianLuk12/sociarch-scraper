@@ -372,13 +372,12 @@ class MovieScraper:
             # Get a new page/tab
             self.page = await self.browser.get(self.base_url)
             
-            # Set window size on the page/tab (not browser) only if not headless
-            if not self.headless:
-                try:
-                    await self.page.set_window_size(width=1920, height=1080)
-                    logger.info("Window size set to 1920x1080")
-                except Exception as e:
-                    logger.warning(f"Could not set window size: {e}")
+            # Always set window size to 1920x1080 before language switching
+            try:
+                await self.page.set_window_size(width=1920, height=1080)
+                logger.info("Window size set to 1920x1080")
+            except Exception as e:
+                logger.warning(f"Could not set window size: {e}")
             
             # Minimal wait for page to load (reduced from 2 seconds)
             await asyncio.sleep(1)
