@@ -300,7 +300,7 @@ class MovieScraper:
         #     raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
             
         try:
-            logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
+            # logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
             
             # Close existing browser - be more aggressive about cleanup
             try:
