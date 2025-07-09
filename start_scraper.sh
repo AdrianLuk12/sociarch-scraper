@@ -31,23 +31,14 @@ fi
 # Check Chrome installation
 if ! command_exists google-chrome; then
     echo "[ERROR] Google Chrome not found!"
-    if [ "$IS_EC2" = "true" ]; then
-        echo "[INFO] Installing Chrome on EC2..."
-        # Install Chrome
-        wget -q -O - https://dl-ssl.google.com/linux/linux_signing_key.pub | sudo apt-key add - 2>/dev/null || true
-        sudo sh -c 'echo "deb [arch=amd64] http://dl.google.com/linux/chrome/deb/ stable main" >> /etc/apt/sources.list.d/google.list' 2>/dev/null || true
-        sudo apt update -y >/dev/null 2>&1 || true
-        sudo apt install -y google-chrome-stable >/dev/null 2>&1 || true
-        
-        if ! command_exists google-chrome; then
-            echo "[ERROR] Failed to install Chrome automatically"
-            exit 1
-        fi
-        echo "[INFO] Chrome installed successfully"
-    else
-        echo "[ERROR] Please install Google Chrome"
-        exit 1
-    fi
+    echo "[ERROR] Please install Google Chrome"
+    exit 1
+fi
+
+if ! command_exists Xvfb; then
+    echo "[ERROR] Xvfb not found!"
+    echo "[ERROR] Please install Xvfb"
+    exit 1
 fi
 
 # Set up environment
