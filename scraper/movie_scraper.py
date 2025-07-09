@@ -295,9 +295,9 @@ class MovieScraper:
         """Restart the browser after timeout or failure with retry logic"""
         self.restart_attempts += 1
         
-        if self.restart_attempts > self.max_restart_attempts:
-            logger.error(f"Maximum browser restart attempts ({self.max_restart_attempts}) exceeded")
-            raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
+        # if self.restart_attempts > self.max_restart_attempts:
+        #     logger.error(f"Maximum browser restart attempts ({self.max_restart_attempts}) exceeded")
+        #     raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
             
         try:
             logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
