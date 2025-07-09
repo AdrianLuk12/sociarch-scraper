@@ -178,7 +178,7 @@ class MovieScraper:
                 zd.start(
                     headless=False,
                     browser_args=browser_args,
-                    lang="en-US",
+                    lang="en-GB",
                     no_sandbox=True
                 ),
                 timeout=timeout_seconds
@@ -1015,7 +1015,7 @@ class MovieScraper:
         # Navigate to movie page
         await self.page.get(movie_url)
         # Reduced wait time for page load (from 2 to 0.5 seconds)
-        await asyncio.sleep(0.5)
+        await asyncio.sleep(3)
         
         # Scrape genre/category
         category = await self.page.evaluate("""
