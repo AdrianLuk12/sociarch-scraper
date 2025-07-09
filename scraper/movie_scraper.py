@@ -158,10 +158,7 @@ class MovieScraper:
                 "--disable-session-crashed-bubble",
                 "--disable-search-engine-choice-screen",
                 "--user-data-dir=/tmp/uc_chrome_data",
-                "--disable-gpu",
-                "--headless=new",
-                "--remote-debugging-host=127.0.0.1",
-                "--remote-debugging-port=34613"
+                "--disable-gpu"
             ]
             
             # Read NO_SANDBOX from environment - default to true for EC2
