@@ -295,12 +295,12 @@ class MovieScraper:
         """Restart the browser after timeout or failure with retry logic"""
         self.restart_attempts += 1
         
-        # if self.restart_attempts > self.max_restart_attempts:
-        #     logger.error(f"Maximum browser restart attempts ({self.max_restart_attempts}) exceeded")
-        #     raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
+        if self.restart_attempts > self.max_restart_attempts:
+            logger.error(f"Maximum browser restart attempts ({self.max_restart_attempts}) exceeded")
+            raise Exception(f"Browser restart failed after {self.max_restart_attempts} attempts")
             
         try:
-            # logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
+            logger.warning(f"Restarting browser due to timeout or failure (attempt {self.restart_attempts}/{self.max_restart_attempts})...")
             
             # Close existing browser - be more aggressive about cleanup
             try:
@@ -922,25 +922,15 @@ class MovieScraper:
             Dictionary with movie details
         """
         try:
+            # Reset restart attempts for this URL
+            self.restart_attempts = 0
             logger.info(f"Scraping details for movie: {movie_name} (timeout: {self.scraper_timeout}s)")
             
-            # Step 1: Restart browser entirely before scraping
+            # Step 1: Restart browser entirely before scraping (includes homepage navigation)
             logger.info(f"Restarting browser before scraping movie: {movie_name}")
             await self._restart_browser()
             
-            # Step 2: Navigate to homepage
-            logger.info("Navigating to homepage after restart")
-            homepage_success = await self.navigate_to_homepage()
-            if not homepage_success:
-                logger.error(f"Failed to navigate to homepage for movie {movie_name}")
-                return {
-                    'name': movie_name,
-                    'url': movie_url,
-                    'category': 'Homepage Error',
-                    'description': 'Failed to navigate to homepage after restart'
-                }
-            
-            # Step 3: Navigate to movie URL and scrape (language switching already done in navigate_to_homepage)
+            # Step 2: Navigate to movie URL and scrape (language switching already done in _restart_browser)
             logger.info(f"Navigating to movie URL: {movie_url}")
             
             # Wrap the scraping logic with timeout
@@ -952,6 +942,8 @@ class MovieScraper:
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping movie details for {movie_name}, restarting browser...")
             try:
+                # Reset restart attempts for retry
+                self.restart_attempts = 0
                 await self._restart_browser()
                 # Brief delay after restart to let browser stabilize
                 await asyncio.sleep(1)
@@ -975,6 +967,8 @@ class MovieScraper:
                 logger.error(f"Connection error scraping movie details for {movie_name}: {e}")
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
+                    # Reset restart attempts for retry
+                    self.restart_attempts = 0
                     await self._restart_browser()
                     # Brief delay after restart to let browser stabilize
                     await asyncio.sleep(1)
@@ -1067,24 +1061,15 @@ class MovieScraper:
             Dictionary with cinema details
         """
         try:
+            # Reset restart attempts for this URL
+            self.restart_attempts = 0
             logger.info(f"Scraping details for cinema: {cinema_name} (timeout: {self.scraper_timeout}s)")
             
-            # Step 1: Restart browser entirely before scraping
+            # Step 1: Restart browser entirely before scraping (includes homepage navigation)
             logger.info(f"Restarting browser before scraping cinema: {cinema_name}")
             await self._restart_browser()
             
-            # Step 2: Navigate to homepage
-            logger.info("Navigating to homepage after restart")
-            homepage_success = await self.navigate_to_homepage()
-            if not homepage_success:
-                logger.error(f"Failed to navigate to homepage for cinema {cinema_name}")
-                return {
-                    'name': cinema_name,
-                    'url': cinema_url,
-                    'address': 'Failed to navigate to homepage after restart'
-                }
-            
-            # Step 3: Navigate to cinema URL and scrape (language switching already done in navigate_to_homepage)
+            # Step 2: Navigate to cinema URL and scrape (language switching already done in _restart_browser)
             logger.info(f"Navigating to cinema URL: {cinema_url}")
             
             # Wrap the scraping logic with timeout
@@ -1096,6 +1081,8 @@ class MovieScraper:
         except asyncio.TimeoutError:
             logger.error(f"Timeout ({self.scraper_timeout}s) scraping cinema details for {cinema_name}, restarting browser...")
             try:
+                # Reset restart attempts for retry
+                self.restart_attempts = 0
                 await self._restart_browser()
                 # Brief delay after restart to let browser stabilize
                 await asyncio.sleep(1)
@@ -1118,6 +1105,8 @@ class MovieScraper:
                 logger.error(f"Connection error scraping cinema details for {cinema_name}: {e}")
                 logger.warning("Detected connection failure, restarting browser...")
                 try:
+                    # Reset restart attempts for retry
+                    self.restart_attempts = 0
                     await self._restart_browser()
                     # Brief delay after restart to let browser stabilize
                     await asyncio.sleep(1)
@@ -1222,14 +1211,10 @@ class MovieScraper:
             
             # If cinema_url is provided, restart browser and navigate to it
             if cinema_url:
+                # Reset restart attempts for this URL
+                self.restart_attempts = 0
                 logger.info(f"Restarting browser before scraping showtimes for cinema: {cinema_name}")
                 await self._restart_browser()
-                
-                logger.info("Navigating to homepage after restart")
-                homepage_success = await self.navigate_to_homepage()
-                if not homepage_success:
-                    logger.error(f"Failed to navigate to homepage for cinema showtimes {cinema_name}")
-                    return
                 
                 logger.info(f"Navigating to cinema URL: {cinema_url}")
                 await self.page.get(cinema_url)
