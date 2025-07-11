@@ -6,15 +6,17 @@ import logging
 import time
 import asyncio
 import csv
+import tempfile
+import shutil
 from typing import Dict, List, Optional, Union, Tuple
 from datetime import datetime, date
 import zendriver as zd
-from dotenv import load_dotenv
+from dotenv import load_dotenv, find_dotenv
 
 from db.supabase_client import SupabaseClient
 
 # Load environment variables
-load_dotenv()
+load_dotenv(find_dotenv())
 
 logger = logging.getLogger(__name__)
 
@@ -22,22 +24,27 @@ logger = logging.getLogger(__name__)
 class MovieScraper:
     """Movie scraper for hkmovie6.com using Zendriver"""
     
-    def __init__(self, headless: bool = True, delay: float = 1):
+    def __init__(self, headless: bool = None, delay: float = None):
         """
         Initialize the movie scraper.
         
         Args:
-            headless: Whether to run browser in headless mode
-            delay: Delay between requests in seconds (reduced default)
+            headless: Whether to run browser in headless mode (overrides HEADLESS_MODE env var)
+            delay: Delay between requests in seconds (overrides SCRAPER_DELAY env var)
         """
         self.base_url = "https://hkmovie6.com/"
-        self.delay = delay
-        self.headless = headless
+        # Read from environment variables with fallback to parameters or defaults
+        self.headless = headless if headless is not None else os.getenv('HEADLESS_MODE', 'true').lower() in ('true', '1', 'yes', 'on')
+        self.delay = delay if delay is not None else float(os.getenv('SCRAPER_DELAY', '1'))
         self.browser = None
         self.page = None
         self.db_client = SupabaseClient()
+        # Create unique temporary directory for browser profile
+        self.temp_profile_dir = None
         # Read timeout from environment (default: 120 seconds for EC2)
         self.scraper_timeout = float(os.getenv('SCRAPER_TIMEOUT', '120'))
+        # Read restart browser per URL option from environment (default: true)
+        self.restart_browser_per_url = os.getenv('RESTART_BROWSER_PER_URL', 'false').lower() in ('true', '1', 'yes', 'on')
         # Track restart attempts
         self.restart_attempts = 0
         self.max_restart_attempts = 3
@@ -138,6 +145,11 @@ class MovieScraper:
             # Detect if running on EC2
             is_ec2 = os.getenv('ENV', '').lower() == 'production' or self._is_ec2_environment()
             
+            # Create unique temporary directory for browser profile
+            if not self.temp_profile_dir:
+                self.temp_profile_dir = tempfile.mkdtemp(prefix='uc_chrome_')
+                logger.info(f"Created temporary browser profile directory: {self.temp_profile_dir}")
+            
             # Chrome options as specified by user
             browser_args = [
                 "--remote-allow-origins=*",
@@ -157,7 +169,7 @@ class MovieScraper:
                 "--disable-features=IsolateOrigins,DisableLoadExtensionCommandLineSwitch,site-per-process",
                 "--disable-session-crashed-bubble",
                 "--disable-search-engine-choice-screen",
-                "--user-data-dir=/tmp/uc_chrome_data",
+                f"--user-data-dir={self.temp_profile_dir}",
                 "--disable-gpu"
             ]
             
@@ -176,10 +188,10 @@ class MovieScraper:
             
             self.browser = await asyncio.wait_for(
                 zd.start(
-                    headless=False,
+                    headless=self.headless,
                     browser_args=browser_args,
                     lang="en-GB",
-                    no_sandbox=True
+                    no_sandbox=no_sandbox
                 ),
                 timeout=timeout_seconds
             )
@@ -217,13 +229,22 @@ class MovieScraper:
             return False
     
     async def close(self):
-        """Close the browser"""
+        """Close the browser and cleanup temporary profile directory"""
         if self.browser:
             try:
                 await self.browser.stop()
                 logger.info("Browser closed successfully")
             except Exception as e:
                 logger.error(f"Error closing browser: {e}")
+        
+        # Clean up temporary profile directory
+        if self.temp_profile_dir and os.path.exists(self.temp_profile_dir):
+            try:
+                shutil.rmtree(self.temp_profile_dir)
+                logger.info(f"Cleaned up temporary browser profile directory: {self.temp_profile_dir}")
+                self.temp_profile_dir = None
+            except Exception as e:
+                logger.warning(f"Error cleaning up temporary profile directory: {e}")
     
     def _is_connection_error(self, error: Exception) -> bool:
         """
@@ -925,12 +946,18 @@ class MovieScraper:
             self.restart_attempts = 0
             logger.info(f"Scraping details for movie: {movie_name} (timeout: {self.scraper_timeout}s)")
             
-            # Step 1: Restart browser entirely before scraping (includes homepage navigation)
-            logger.info(f"Restarting browser before scraping movie: {movie_name}")
-            await self._restart_browser()
-            
-            # Step 2: Navigate to movie URL and scrape (language switching already done in _restart_browser)
-            logger.info(f"Navigating to movie URL: {movie_url}")
+            # Step 1: Conditionally restart browser before scraping (if enabled)
+            if self.restart_browser_per_url:
+                logger.info(f"Restarting browser before scraping movie: {movie_name}")
+                await self._restart_browser()
+                # Step 2: Navigate to movie URL and scrape (language switching already done in _restart_browser)
+                logger.info(f"Navigating to movie URL: {movie_url}")
+            else:
+                # Navigate directly to movie URL without browser restart
+                logger.info(f"Navigating to movie URL (no restart): {movie_url}")
+                # await self.page.get(movie_url)
+                # Wait for page to load (no language switching needed - already in English)
+                # await asyncio.sleep(2)
             
             # Wrap the scraping logic with timeout
             return await asyncio.wait_for(
@@ -1064,12 +1091,18 @@ class MovieScraper:
             self.restart_attempts = 0
             logger.info(f"Scraping details for cinema: {cinema_name} (timeout: {self.scraper_timeout}s)")
             
-            # Step 1: Restart browser entirely before scraping (includes homepage navigation)
-            logger.info(f"Restarting browser before scraping cinema: {cinema_name}")
-            await self._restart_browser()
-            
-            # Step 2: Navigate to cinema URL and scrape (language switching already done in _restart_browser)
-            logger.info(f"Navigating to cinema URL: {cinema_url}")
+            # Step 1: Conditionally restart browser before scraping (if enabled)
+            if self.restart_browser_per_url:
+                logger.info(f"Restarting browser before scraping cinema: {cinema_name}")
+                await self._restart_browser()
+                # Step 2: Navigate to cinema URL and scrape (language switching already done in _restart_browser)
+                logger.info(f"Navigating to cinema URL: {cinema_url}")
+            else:
+                # Navigate directly to cinema URL without browser restart
+                logger.info(f"Navigating to cinema URL (no restart): {cinema_url}")
+                # await self.page.get(cinema_url)
+                # Wait for page to load (no language switching needed - already in English)
+                # await asyncio.sleep(2)
             
             # Wrap the scraping logic with timeout
             return await asyncio.wait_for(
@@ -1208,15 +1241,21 @@ class MovieScraper:
         try:
             logger.info(f"Scraping showtimes for cinema: {cinema_name}")
             
-            # If cinema_url is provided, restart browser and navigate to it
+            # If cinema_url is provided, conditionally restart browser and navigate to it
             if cinema_url:
                 # Reset restart attempts for this URL
                 self.restart_attempts = 0
-                logger.info(f"Restarting browser before scraping showtimes for cinema: {cinema_name}")
-                await self._restart_browser()
                 
-                logger.info(f"Navigating to cinema URL: {cinema_url}")
-                await self.page.get(cinema_url)
+                if self.restart_browser_per_url:
+                    logger.info(f"Restarting browser before scraping showtimes for cinema: {cinema_name}")
+                    await self._restart_browser()
+                    logger.info(f"Navigating to cinema URL: {cinema_url}")
+                else:
+                    logger.info(f"Navigating to cinema URL (no restart): {cinema_url}")
+                    # await self.page.get(cinema_url)
+                    # Wait for page to load (no language switching needed - already in English)
+                    # await asyncio.sleep(1)
+                
                 await asyncio.sleep(1)  # Wait for page to load
             
             # Get all date buttons
@@ -1624,9 +1663,10 @@ class MovieScraper:
 class MovieScraperSync:
     """Synchronous wrapper for the async MovieScraper"""
     
-    def __init__(self, headless: bool = True, delay: float = 1):
-        self.headless = headless
-        self.delay = delay
+    def __init__(self, headless: bool = None, delay: float = None):
+        # Read from environment variables with fallback to parameters or defaults
+        self.headless = headless if headless is not None else os.getenv('HEADLESS_MODE', 'true').lower() in ('true', '1', 'yes', 'on')
+        self.delay = delay if delay is not None else float(os.getenv('SCRAPER_DELAY', '1'))
         self.scraper = None
         self.loop = None
     

@@ -15,7 +15,7 @@ def test_environment():
     load_dotenv(find_dotenv())
     
     required_vars = ['SUPABASE_URL', 'SUPABASE_KEY']
-    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'SCRAPER_DELAY', 'HEADLESS_MODE', 'NO_SANDBOX', 'SCRAPER_TIMEOUT']
+    optional_vars = ['SUPABASE_SERVICE_KEY', "SUPABASE_SCHEMA", 'HEADLESS_MODE', 'NO_SANDBOX', 'RESTART_BROWSER_PER_URL', 'SCRAPER_TIMEOUT', 'SCRAPER_DELAY']
     
     missing_required = []
     
@@ -156,8 +156,8 @@ def test_scraper_initialization():
     try:
         from scraper.movie_scraper import MovieScraper
         
-        # Test async scraper initialization
-        scraper = MovieScraper(headless=True, delay=1)
+        # Test async scraper initialization (uses environment variables)
+        scraper = MovieScraper()
         print("  [OK] MovieScraper initialized successfully")
         
         # Test scraper setup

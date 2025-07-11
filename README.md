@@ -70,8 +70,13 @@ SUPABASE_SERVICE_KEY=your_supabase_service_role_key
 # Optimized Settings (defaults)
 HEADLESS_MODE=true
 NO_SANDBOX=false
+SCRAPER_DELAY=0.5
 SCRAPER_TIMEOUT=120
-SCRAPER_DELAY=1
+SCRAPER_INTERVAL=21600
+RESTART_BROWSER_PER_URL=true
+
+# Optional - Run Once
+RUN_ONCE=false  # Set to true to run once and exit
 ```
 
 ### 3. Test Setup
@@ -199,7 +204,11 @@ SUPABASE_KEY=your_anon_key
 HEADLESS_MODE=true
 NO_SANDBOX=true
 SCRAPER_TIMEOUT=180
-SCRAPER_DELAY=0.5
+SCRAPER_INTERVAL=21600
+RESTART_BROWSER_PER_URL=true
+
+# Optional - Run Once
+RUN_ONCE=false  # Set to true to run once and exit
 ```
 
 #### Step 5: Test Installation
@@ -331,10 +340,11 @@ tail -f /home/ec2-user/sociarch-scraper/movie_scraper.log
 ### Optional (EC2 Optimized Defaults)
 - `SUPABASE_SCHEMA`: Database schema name (default: 'knowledge_base')
 - `SUPABASE_SERVICE_KEY`: Service role key for admin operations
-- `SCRAPER_DELAY`: Delay between requests in seconds (default: 1)
 - `HEADLESS_MODE`: Run browser in headless mode (default: 'true' for EC2)
+- `SCRAPER_DELAY`: Delay between requests in seconds (default: 1)
 - `NO_SANDBOX`: Disable Chrome sandbox (default: 'true' for EC2)
 - `SCRAPER_TIMEOUT`: Individual page timeout in seconds (default: 120)
+- `RESTART_BROWSER_PER_URL`: Restart browser before each URL scraping (default: 'true'). When disabled, skips language switching for faster execution
 
 ## How It Works
 
@@ -395,7 +405,9 @@ sudo chown -R ec2-user:ec2-user /home/ec2-user/sociarch-scraper
 ```bash
 # Run with debug output
 export HEADLESS_MODE=false
+export SCRAPER_DELAY=0.5
 export SCRAPER_TIMEOUT=300
+export RESTART_BROWSER_PER_URL=false  # Disable browser restart and language switching for faster debugging
 python main.py
 ```
 
